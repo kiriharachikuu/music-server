@@ -1,5 +1,5 @@
 // XingTone后端 - Prisma 数据模型
-// 数据库：PostgreSQL 15+
+// 数据库：SQLite（文件式，零配置，易于上手）
 // 文档：https://pris.ly/d/prisma-schema
 
 generator client {
@@ -7,7 +7,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 

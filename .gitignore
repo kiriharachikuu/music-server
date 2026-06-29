@@ -21,6 +21,10 @@ coverage
 # Prisma 生成产物
 generated
 
+# SQLite 数据库文件
+*.db
+*.db-journal
+
 # 系统文件
 .DS_Store
 Thumbs.db
