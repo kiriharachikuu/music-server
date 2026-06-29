@@ -21,4 +21,10 @@ export class SearchController {
   ) {
     return this.searchService.search({ q, sort, tag, page, limit, pageSize });
   }
+
+  /** GET /api/search/hot 热门搜索词 */
+  @Get('hot')
+  hot() {
+    return this.searchService.getHotKeywords();
+  }
 }

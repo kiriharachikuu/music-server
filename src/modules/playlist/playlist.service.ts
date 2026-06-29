@@ -51,4 +51,10 @@ export class PlaylistService {
     }
     return playlist;
   }
+
+  /** 歌单下的歌曲列表（扁平数组，按 sort 升序） */
+  async getSongs(id: string) {
+    const playlist = await this.getDetail(id);
+    return playlist.playlistSongs.map((ps) => ps.song);
+  }
 }

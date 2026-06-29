@@ -24,4 +24,10 @@ export class PlaylistController {
   getDetail(@Param('id') id: string) {
     return this.playlistService.getDetail(id);
   }
+
+  /** GET /api/playlists/:id/songs 歌单下的歌曲列表 */
+  @Get(':id/songs')
+  getSongs(@Param('id') id: string) {
+    return this.playlistService.getSongs(id);
+  }
 }

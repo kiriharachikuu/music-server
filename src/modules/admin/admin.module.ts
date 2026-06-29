@@ -4,6 +4,7 @@ import { AdminBannerController } from './admin-banner.controller';
 import { AdminPlaylistController } from './admin-playlist.controller';
 import { AdminSettingController } from './admin-setting.controller';
 import { AdminSongController } from './admin-song.controller';
+import { AdminTagController } from './admin-tag.controller';
 import { AdminUploadController } from './admin-upload.controller';
 import { AdminUserController } from './admin-user.controller';
 import { AdminController } from './admin.controller';
@@ -19,6 +20,7 @@ import { AdminService } from './admin.service';
   controllers: [
     AdminController,
     AdminSongController,
+    AdminTagController,
     AdminAlbumController,
     AdminPlaylistController,
     AdminBannerController,

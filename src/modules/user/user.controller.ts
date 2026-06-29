@@ -53,6 +53,17 @@ export class UserController {
     return this.userService.toggleFavorite(userId, dto.songId);
   }
 
+  /** DELETE /api/user/favorites/:songId 取消收藏 */
+  @Delete('favorites/:songId')
+  @HttpCode(HttpStatus.OK)
+  async removeFavorite(
+    @CurrentUser('id') userId: string,
+    @Param('songId') songId: string,
+  ) {
+    const result = await this.userService.toggleFavorite(userId, songId);
+    return { ...result, favorited: false };
+  }
+
   /** GET /api/user/playlists 我的歌单 */
   @Get('playlists')
   getMyPlaylists(@CurrentUser('id') userId: string) {

@@ -144,6 +144,15 @@ export class AdminResourceService {
     return { deleted: true };
   }
 
+  // ============ 标签 ============
+
+  async listTags() {
+    return this.prisma.tag.findMany({
+      orderBy: { createdAt: 'asc' },
+      select: { id: true, name: true },
+    });
+  }
+
   // ============ 专辑 ============
 
   async listAlbums(query: {
