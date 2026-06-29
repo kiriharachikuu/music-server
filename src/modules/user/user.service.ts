@@ -136,7 +136,6 @@ export class UserService {
     }));
     const result = await this.prisma.playlistSong.createMany({
       data,
-      skipDuplicates: true,
     });
     return { added: result.count };
   }

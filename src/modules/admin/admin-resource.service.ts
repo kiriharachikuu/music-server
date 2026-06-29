@@ -93,7 +93,6 @@ export class AdminResourceService {
         if (tagIds.length) {
           await tx.songTag.createMany({
             data: tagIds.map((tagId) => ({ songId: id, tagId })),
-            skipDuplicates: true,
           });
         }
       }
