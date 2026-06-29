@@ -1,98 +1,167 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# XingTone Server
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+NestJS 后端 API 服务，为 XingTone 音乐播放器提供数据与认证支撑。
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## 技术栈
 
-## Description
+| 技术 | 用途 |
+|------|------|
+| NestJS 11 | Web 框架 |
+| Prisma ORM | 数据库访问层 |
+| PostgreSQL 15+ | 关系型数据库 |
+| JWT + Passport | 身份认证与鉴权 |
+| class-validator | DTO 参数校验 |
+| Docker + nginx | 容器化部署 |
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## 数据模型
 
-## Project setup
+- **User** — 用户（USER / ADMIN 角色）
+- **Song** — 歌曲（关联 Album、Tag）
+- **Album** — 专辑
+- **Tag** — 标签
+- **Playlist** — 歌单（关联 User、Songs）
+- **Favorite** — 收藏（用户 ↔ 歌曲）
+- **PlayHistory** — 播放历史
+- **Banner** — 首页横幅
+- **SystemSetting** — 系统配置（KV 存储）
+- **DownloadRecord** — 下载记录
+
+## API 概览
+
+### 公开接口
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/auth/register` | 用户注册 |
+| POST | `/api/auth/login` | 用户登录 |
+| GET | `/api/songs` | 歌曲列表 |
+| GET | `/api/songs/:id` | 歌曲详情 |
+| GET | `/api/albums` | 专辑列表 |
+| GET | `/api/albums/:id` | 专辑详情（含歌曲） |
+| GET | `/api/playlists` | 歌单列表 |
+| GET | `/api/banners` | Banner 列表 |
+| GET | `/api/discover` | 发现页数据 |
+| GET | `/api/rankings` | 排行榜 |
+
+### 需认证接口（`Authorization: Bearer <token>`）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/user/profile` | 当前用户信息 |
+| GET | `/api/user/favorites` | 我的收藏 |
+| POST | `/api/user/favorites/:songId` | 添加收藏 |
+| DELETE | `/api/user/favorites/:songId` | 取消收藏 |
+| GET | `/api/user/playlists` | 我的歌单 |
+| POST | `/api/user/playlists` | 创建歌单 |
+| PUT | `/api/user/playlists/:id` | 更新歌单 |
+| DELETE | `/api/user/playlists/:id` | 删除歌单 |
+| POST | `/api/user/playlists/:id/songs` | 添加歌曲到歌单 |
+| DELETE | `/api/user/playlists/:id/songs` | 从歌单移除歌曲 |
+| GET | `/api/user/history` | 播放历史 |
+| DELETE | `/api/user/history` | 清空历史 |
+
+### 管理后台接口（需 ADMIN 角色）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| CRUD | `/api/admin/songs` | 歌曲管理 |
+| CRUD | `/api/admin/albums` | 专辑管理 |
+| CRUD | `/api/admin/playlists` | 歌单管理 |
+| CRUD | `/api/admin/banners` | Banner 管理 |
+| CRUD | `/api/admin/users` | 用户管理 |
+| GET/PUT | `/api/admin/settings` | 系统设置 |
+| POST | `/api/admin/upload` | 文件上传 |
+
+## 快速开始
+
+### 环境要求
+
+- Node.js 20+
+- PostgreSQL 15+
+- npm / pnpm / yarn
+
+### 1. 安装依赖
 
 ```bash
-$ npm install
+npm install
 ```
 
-## Compile and run the project
+### 2. 配置环境变量
 
 ```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+cp .env.example .env
+# 编辑 .env，填入 DATABASE_URL 和 JWT_SECRET
 ```
 
-## Run tests
+### 3. 初始化数据库
 
 ```bash
-# unit tests
-$ npm run test
+# 生成 Prisma Client
+npx prisma generate
 
-# e2e tests
-$ npm run test:e2e
+# 执行数据库迁移
+npx prisma migrate dev --name init
 
-# test coverage
-$ npm run test:cov
+# 填充种子数据（可选）
+npx prisma db seed
 ```
 
-## Deployment
-
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+### 4. 启动服务
 
 ```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+# 开发模式（热重载）
+npm run start:dev
+
+# 生产模式
+npm run build
+npm run start:prod
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+服务启动后运行于 `http://localhost:3000`，API 基础路径为 `/api`。
 
-## Resources
+## 环境变量
 
-Check out a few resources that may come in handy when working with NestJS:
+| 变量名 | 必填 | 说明 |
+|--------|------|------|
+| `DATABASE_URL` | 是 | PostgreSQL 连接串 |
+| `PORT` | 否 | 服务端口，默认 3000 |
+| `JWT_SECRET` | 是 | JWT 签名密钥（生产必须替换） |
+| `JWT_EXPIRES` | 否 | JWT 过期时间，默认 `7d` |
+| `CORS_ORIGINS` | 是 | 跨域白名单，逗号分隔 |
+| `STORAGE_DRIVER` | 否 | `local` 或 `s3`，默认 `local` |
+| `LOCAL_STORAGE_PATH` | 否 | 本地存储路径，默认 `./uploads` |
+| `S3_*` | s3 时 | S3 相关配置（见 `.env.example`） |
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+## 部署
 
-## Support
+支持 Docker 一键部署：
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+```bash
+docker-compose up -d
+```
 
-## Stay in touch
+或参考 `DEPLOY.md`（位于项目根目录）了解手动部署、Vercel 前端部署及 nginx 反向代理配置。
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+## 项目结构
+
+```
+src/
+├── common/            # 公共组件：拦截器、过滤器、装饰器、工具函数
+├── config/            # 配置文件（.env 映射、JWT、日志）
+├── modules/
+│   ├── admin/        # 管理后台 API
+│   ├── album/        # 专辑
+│   ├── auth/         # 认证（登录/注册/JWT）
+│   ├── banner/       # Banner
+│   ├── playlist/     # 歌单
+│   ├── search/       # 搜索
+│   ├── song/         # 歌曲
+│   ├── stats/        # 统计、发现、排行榜
+│   ├── upload/       # 文件上传（本地/S3 存储抽象）
+│   └── user/         # 用户个人中心
+└── prisma/           # Prisma 模块封装
+```
 
 ## License
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+MIT
