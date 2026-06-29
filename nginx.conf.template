@@ -1,0 +1,125 @@
+# XingTone后端 - Nginx 反向代理模板
+# 用法：将 $DOMAIN 替换为实际域名，将 $SSL_CERT / $SSL_KEY 替换为证书路径后，
+#       放到宝塔/Nginx 站点配置目录
+# 占位变量：$DOMAIN / $SSL_CERT / $SSL_KEY / $UPLOADS_PATH
+#   - $DOMAIN      站点域名，如 api.xtmusic.com
+#   - $SSL_CERT    SSL 证书路径，如 /www/server/panel/vhost/cert/api.xtmusic.com/fullchain.pem
+#   - $SSL_KEY     SSL 私钥路径，如 /www/server/panel/vhost/cert/api.xtmusic.com/privkey.pem
+#   - $UPLOADS_PATH 上传文件绝对路径，如 /www/wwwroot/xtmusic/uploads
+
+# gzip 压缩
+gzip on;
+gzip_min_length 1k;
+gzip_comp_level 6;
+gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript image/svg+xml;
+gzip_vary on;
+gzip_disable "MSIE [1-6]\.";
+
+# 上游后端服务
+upstream xtmusic_backend {
+    server 127.0.0.1:3000;
+    keepalive 32;
+}
+
+# HTTP → HTTPS 跳转（启用 SSL 时使用；若暂不启用 SSL 可注释掉此 server，保留下方 80 端口配置）
+server {
+    listen 80;
+    server_name $DOMAIN;
+    # 健康检查保留在 80 端口，便于负载均衡探活
+    location = /api/health {
+        proxy_pass http://xtmusic_backend;
+        access_log off;
+    }
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# HTTPS 站点（启用 SSL 时使用）
+server {
+    listen 443 ssl http2;
+    server_name $DOMAIN;
+
+    # ----- SSL 证书 -----
+    ssl_certificate     $SSL_CERT;
+    ssl_certificate_key $SSL_KEY;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-RSA-AES128-GCM-SHA256:HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+
+    # 安全响应头
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header X-Frame-Options SAMEORIGIN always;
+    add_header X-Content-Type-Options nosniff always;
+
+    # 客户端上传体积限制（歌曲/封面等）
+    client_max_body_size 100m;
+
+    # 接口反向代理到 NestJS（端口 3000）
+    location /api/ {
+        proxy_pass http://xtmusic_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection "";
+        proxy_read_timeout 300s;
+    }
+
+    # 本地静态资源（上传文件）
+    location /uploads/ {
+        alias $UPLOADS_PATH/;
+        expires 30d;
+        access_log off;
+        add_header Cache-Control "public, no-transform";
+    }
+
+    # 健康检查
+    location = /api/health {
+        proxy_pass http://xtmusic_backend;
+        access_log off;
+    }
+
+    location / {
+        return 200 'xtmusic backend';
+        add_header Content-Type text/plain;
+    }
+}
+
+# ===== 不启用 SSL 时的纯 HTTP 配置（按需取消注释，并注释上方两个 server 块）=====
+# server {
+#     listen 80;
+#     server_name $DOMAIN;
+#     client_max_body_size 100m;
+#
+#     location /api/ {
+#         proxy_pass http://xtmusic_backend;
+#         proxy_http_version 1.1;
+#         proxy_set_header Host $host;
+#         proxy_set_header X-Real-IP $remote_addr;
+#         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+#         proxy_set_header X-Forwarded-Proto $scheme;
+#         proxy_set_header Connection "";
+#         proxy_read_timeout 300s;
+#     }
+#
+#     location /uploads/ {
+#         alias $UPLOADS_PATH/;
+#         expires 30d;
+#         access_log off;
+#         add_header Cache-Control "public, no-transform";
+#     }
+#
+#     location = /api/health {
+#         proxy_pass http://xtmusic_backend;
+#         access_log off;
+#     }
+#
+#     location / {
+#         return 200 'xtmusic backend';
+#         add_header Content-Type text/plain;
+#     }
+# }

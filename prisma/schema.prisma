@@ -1,0 +1,220 @@
+// XingTone后端 - Prisma 数据模型
+// 数据库：PostgreSQL 15+
+// 文档：https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 用户角色
+enum Role {
+  USER
+  ADMIN
+}
+
+// 歌曲发布状态
+enum SongStatus {
+  PUBLISHED
+  DRAFT
+}
+
+// Banner 显示状态
+enum BannerStatus {
+  VISIBLE
+  HIDDEN
+}
+
+// 用户表
+model User {
+  id        String    @id @default(cuid())
+  username  String    @unique
+  email     String    @unique
+  password  String
+  avatar    String?
+  role      Role      @default(USER)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  playlists       Playlist[]
+  favorites       Favorite[]
+  playHistories   PlayHistory[]
+  downloadRecords DownloadRecord[]
+
+  @@index([deletedAt])
+}
+
+// 歌曲表
+model Song {
+  id          String     @id @default(cuid())
+  title       String
+  artist      String
+  albumId     String?
+  album       Album?     @relation(fields: [albumId], references: [id], onDelete: SetNull)
+  duration    Int
+  fileUrl     String
+  coverUrl    String?
+  lyricUrl    String?
+  releaseDate DateTime
+  plays       Int        @default(0)
+  status      SongStatus @default(PUBLISHED)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  deletedAt   DateTime?
+
+  playlistSongs   PlaylistSong[]
+  songTags        SongTag[]
+  favorites       Favorite[]
+  playHistories   PlayHistory[]
+  downloadRecords DownloadRecord[]
+
+  @@index([albumId])
+  @@index([plays])
+  @@index([releaseDate])
+  @@index([status])
+  @@index([deletedAt])
+}
+
+// 专辑表
+model Album {
+  id          String    @id @default(cuid())
+  name        String
+  artist      String
+  cover       String?
+  description String?
+  releaseDate DateTime
+  songCount   Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  songs Song[]
+
+  @@index([deletedAt])
+}
+
+// 歌单表
+model Playlist {
+  id          String    @id @default(cuid())
+  name        String
+  cover       String?
+  description String?
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  isPublic    Boolean   @default(true)
+  playCount   Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  playlistSongs PlaylistSong[]
+
+  @@index([userId])
+  @@index([isPublic])
+  @@index([deletedAt])
+}
+
+// 歌单-歌曲关联表
+model PlaylistSong {
+  id         String   @id @default(cuid())
+  playlistId String
+  songId     String
+  sort       Int
+  createdAt  DateTime @default(now())
+
+  playlist Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+  song     Song     @relation(fields: [songId], references: [id], onDelete: Cascade)
+
+  @@unique([playlistId, songId])
+  @@index([playlistId, sort])
+}
+
+// 首页 Banner 表
+model Banner {
+  id        String       @id @default(cuid())
+  title     String
+  imageUrl  String
+  linkUrl   String?
+  sort      Int          @default(0)
+  status    BannerStatus @default(VISIBLE)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  @@index([sort, status])
+}
+
+// 标签表
+model Tag {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+
+  songTags SongTag[]
+}
+
+// 歌曲-标签关联表
+model SongTag {
+  id     String @id @default(cuid())
+  songId String
+  tagId  String
+
+  song Song @relation(fields: [songId], references: [id], onDelete: Cascade)
+  tag  Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([songId, tagId])
+  @@index([tagId])
+}
+
+// 收藏表
+model Favorite {
+  id        String   @id @default(cuid())
+  userId    String
+  songId    String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  song Song @relation(fields: [songId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, songId])
+  @@index([userId])
+}
+
+// 播放历史表
+model PlayHistory {
+  id        String   @id @default(cuid())
+  userId    String
+  songId    String
+  playTime  DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  song Song @relation(fields: [songId], references: [id], onDelete: Cascade)
+
+  @@index([userId, playTime])
+}
+
+// 下载记录表
+model DownloadRecord {
+  id        String   @id @default(cuid())
+  userId    String
+  songId    String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  song Song @relation(fields: [songId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// 系统设置表
+model SystemSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt
+}

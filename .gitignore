@@ -1,0 +1,31 @@
+# 依赖
+node_modules
+
+# 构建产物
+dist
+build
+
+# 环境变量（不要提交到版本控制）
+.env
+.env.local
+.env.*.local
+
+# 上传目录与日志
+uploads
+logs
+*.log
+
+# 覆盖率
+coverage
+
+# Prisma 生成产物
+generated
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea
+.vscode
+*.swp
