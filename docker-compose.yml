@@ -16,7 +16,11 @@ services:
       JWT_EXPIRES: ${JWT_EXPIRES:-7d}
       STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
       LOCAL_STORAGE_PATH: /app/uploads
-      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+      # 跨域白名单：多个用逗号分隔
+      # 注意：因后端 credentials=true，不能用 *，必须列出具体域名
+      # 留空时后端会走 origin:true 动态回显请求方 Origin（兼容 credentials）
+      # 生产环境建议在宿主机 .env 或 docker-compose.yml 中显式列出域名
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:3001,http://localhost:3002,https://xtmusic.chikuu.top,https://xtmusicadmin.chikuu.top}
       TZ: Asia/Shanghai
     ports:
       - "3000:3000"

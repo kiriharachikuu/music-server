@@ -24,9 +24,17 @@ async function bootstrap() {
   // 安全响应头
   app.use(helmet());
 
-  // 跨域配置
+  // 跨域配置：
+  // - 若配置了具体白名单（不含 *），则按白名单精确匹配
+  // - 若白名单为空或包含 *，则走 origin: true 动态回显请求方 Origin
+  //   （credentials: true 时浏览器拒绝 Access-Control-Allow-Origin: *，
+  //    必须用动态回显或具体域名）
+  const hasWildcard = corsOrigins.includes('*');
+  const effectiveOrigin =
+    corsOrigins.length && !hasWildcard ? corsOrigins : true;
+
   app.enableCors({
-    origin: corsOrigins.length ? corsOrigins : true,
+    origin: effectiveOrigin,
     credentials: true,
   });
 
