@@ -37,14 +37,14 @@ async function main() {
   await prisma.systemSetting.deleteMany();
   await prisma.user.deleteMany();
 
-  // 2. 用户
+  // 2. 用户（avatar 留空，前端用首字母 fallback，避免引用不存在的图片）
   const admin = await prisma.user.create({
     data: {
       username: 'admin',
       email: 'admin@xtmusic.com',
       password: adminPwd,
       role: Role.ADMIN,
-      avatar: '/uploads/avatars/admin.png',
+      avatar: null,
     },
   });
   const user1 = await prisma.user.create({
@@ -53,7 +53,7 @@ async function main() {
       email: 'startong@xtmusic.com',
       password: userPwd,
       role: Role.USER,
-      avatar: '/uploads/avatars/user1.png',
+      avatar: null,
     },
   });
   const user2 = await prisma.user.create({
@@ -62,7 +62,7 @@ async function main() {
       email: 'nightcat@xtmusic.com',
       password: userPwd,
       role: Role.USER,
-      avatar: '/uploads/avatars/user2.png',
+      avatar: null,
     },
   });
 
@@ -73,13 +73,13 @@ async function main() {
     prisma.tag.create({ data: { name: '电子' } }),
   ]);
 
-  // 4. 专辑
+  // 4. 专辑（cover 留空，前端用 Disc3 图标 fallback）
   const [album1, album2] = await Promise.all([
     prisma.album.create({
       data: {
         name: '星海漫游',
         artist: '星瞳',
-        cover: '/uploads/covers/album1.png',
+        cover: null,
         description: '星瞳首张录音室专辑，带你漫游浩瀚星海。',
         releaseDate: new Date('2024-05-20'),
       },
@@ -88,7 +88,7 @@ async function main() {
       data: {
         name: '霓虹之夜',
         artist: 'Synth Riders',
-        cover: '/uploads/covers/album2.png',
+        cover: null,
         description: '复古合成器浪潮，点亮霓虹之夜。',
         releaseDate: new Date('2024-10-31'),
       },
@@ -105,7 +105,7 @@ async function main() {
         duration: 245,
         fileUrl: '/uploads/songs/song1.mp3',
         coverUrl: album1.cover,
-        lyricUrl: '/uploads/lyrics/song1.lrc',
+        lyricUrl: null,
         releaseDate: new Date('2024-05-20'),
         plays: 98000,
         status: SongStatus.PUBLISHED,
@@ -120,7 +120,7 @@ async function main() {
         duration: 218,
         fileUrl: '/uploads/songs/song2.mp3',
         coverUrl: album1.cover,
-        lyricUrl: '/uploads/lyrics/song2.lrc',
+        lyricUrl: null,
         releaseDate: new Date('2024-05-20'),
         plays: 76200,
         status: SongStatus.PUBLISHED,
@@ -163,7 +163,7 @@ async function main() {
         duration: 256,
         fileUrl: '/uploads/songs/song5.mp3',
         coverUrl: album2.cover,
-        lyricUrl: '/uploads/lyrics/song5.lrc',
+        lyricUrl: null,
         releaseDate: new Date('2024-10-31'),
         plays: 88500,
         status: SongStatus.PUBLISHED,
@@ -220,7 +220,7 @@ async function main() {
     prisma.banner.create({
       data: {
         title: '星海漫游 新专辑上线',
-        imageUrl: '/uploads/banners/banner1.png',
+        imageUrl: '',
         linkUrl: `/album/${album1.id}`,
         sort: 1,
         status: BannerStatus.VISIBLE,
@@ -229,7 +229,7 @@ async function main() {
     prisma.banner.create({
       data: {
         title: '霓虹之夜 限时免费',
-        imageUrl: '/uploads/banners/banner2.png',
+        imageUrl: '',
         linkUrl: `/album/${album2.id}`,
         sort: 2,
         status: BannerStatus.VISIBLE,
@@ -238,7 +238,7 @@ async function main() {
     prisma.banner.create({
       data: {
         title: 'XingTone 听见宇宙',
-        imageUrl: '/uploads/banners/banner3.png',
+        imageUrl: '',
         linkUrl: '/',
         sort: 3,
         status: BannerStatus.VISIBLE,
@@ -259,7 +259,7 @@ async function main() {
   const playlist2 = await prisma.playlist.create({
     data: {
       name: '通勤节拍',
-      cover: '/uploads/covers/playlist2.png',
+      cover: null,
       description: '上下班路上的电子节拍。',
       userId: user2.id,
       isPublic: true,
