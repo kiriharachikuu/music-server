@@ -1,13 +1,27 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  buildPaginatedResult,
+  parsePagination,
+  type PaginatedResult,
+} from '../../common/utils/pagination.util';
+
+export interface SongWithAlbum {
+  id: number;
+  title: string;
+  artist: string;
+  duration: number;
+  coverUrl: string | null;
+  audioUrl: string;
+  album: { id: number; name: string } | null;
+}
 
 @Injectable()
 export class SearchService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * 综合搜索：歌曲 + 专辑 + 歌单
-   * 返回 { songs, albums, playlists, total }
+   * 综合搜索：歌曲（分页） + 专辑（前20） + 歌单（前20）
    */
   async search(query: {
     q?: string;
@@ -21,7 +35,11 @@ export class SearchService {
     const tag = (query.tag ?? '').trim();
 
     if (!q) {
-      return { songs: [], albums: [], playlists: [], total: 0 };
+      return {
+        songs: buildPaginatedResult<SongWithAlbum>([], 0, 1, 20),
+        albums: [],
+        playlists: [],
+      };
     }
 
     const insensitive = { contains: q, mode: 'insensitive' as const };
@@ -48,12 +66,16 @@ export class SearchService {
         ? { plays: 'desc' as const }
         : { releaseDate: 'desc' as const };
 
-    const [songs, albums, playlists] = await Promise.all([
+    const pagination = parsePagination(query);
+
+    const [songTotal, songs, albums, playlists] = await Promise.all([
+      this.prisma.song.count({ where: songWhere }),
       this.prisma.song.findMany({
         where: songWhere,
         orderBy,
-        take: 50,
-        include: { album: true },
+        skip: pagination.skip,
+        take: pagination.take,
+        include: { album: { select: { id: true, name: true } } },
       }),
       this.prisma.album.findMany({
         where: {
@@ -76,10 +98,14 @@ export class SearchService {
     ]);
 
     return {
-      songs,
+      songs: buildPaginatedResult(
+        songs as unknown as SongWithAlbum[],
+        songTotal,
+        pagination.page,
+        pagination.limit,
+      ),
       albums,
       playlists,
-      total: songs.length + albums.length + playlists.length,
     };
   }
 

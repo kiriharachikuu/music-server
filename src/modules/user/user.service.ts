@@ -160,7 +160,7 @@ export class UserService {
     return buildPaginatedResult(list, total, page, limit);
   }
 
-  /** 上报播放记录，同时 song.plays++ */
+  /** 上报播放记录，24小时内同一用户同一首歌只计一次播放量，同时清理超出限制的历史记录 */
   async recordHistory(
     userId: string,
     songId: string,
@@ -171,16 +171,64 @@ export class UserService {
     if (!song) {
       throw new NotFoundException('歌曲不存在');
     }
-    await this.prisma.$transaction([
-      this.prisma.playHistory.create({
-        data: { userId, songId, playTime: new Date() },
-      }),
-      this.prisma.song.update({
-        where: { id: songId },
-        data: { plays: { increment: 1 } },
-      }),
-    ]);
+
+    const now = new Date();
+    const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+    const recentPlay = await this.prisma.playHistory.findFirst({
+      where: {
+        userId,
+        songId,
+        playTime: { gte: oneDayAgo },
+      },
+    });
+
+    await this.prisma.$transaction(async (tx) => {
+      if (recentPlay) {
+        await tx.playHistory.create({
+          data: { userId, songId, playTime: now },
+        });
+      } else {
+        await tx.playHistory.create({
+          data: { userId, songId, playTime: now },
+        });
+        await tx.song.update({
+          where: { id: songId },
+          data: { plays: { increment: 1 } },
+        });
+      }
+
+      await this.cleanupExcessHistory(tx, userId);
+    });
+
     return { recorded: true };
+  }
+
+  /**
+   * 清理超出限制的播放历史记录（每个用户最多保留 500 条）
+   */
+  private async cleanupExcessHistory(
+    tx: { playHistory: { count: typeof this.prisma.playHistory.count; deleteMany: typeof this.prisma.playHistory.deleteMany; findMany: typeof this.prisma.playHistory.findMany } },
+    userId: string,
+    maxRecords: number = 500,
+  ) {
+    const total = await tx.playHistory.count({ where: { userId } });
+    if (total <= maxRecords) return;
+
+    const excessCount = total - maxRecords;
+    const oldestRecords = await tx.playHistory.findMany({
+      where: { userId },
+      orderBy: { playTime: 'asc' },
+      take: excessCount + 50,
+      select: { id: true },
+    });
+
+    const idsToDelete = oldestRecords.slice(0, excessCount).map((r: { id: string }) => r.id);
+    if (idsToDelete.length > 0) {
+      await tx.playHistory.deleteMany({
+        where: { id: { in: idsToDelete } },
+      });
+    }
   }
 
   /** 下载记录列表 */

@@ -1,4 +1,5 @@
 import { Controller, Get, Query } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { SearchService } from './search.service';
 
 /**
@@ -9,8 +10,9 @@ import { SearchService } from './search.service';
 export class SearchController {
   constructor(private readonly searchService: SearchService) {}
 
-  /** GET /api/search?q=&sort=time|plays&tag=&page=&limit= */
+  /** GET /api/search?q=&sort=time|plays&tag=&page=&limit=  限制：60秒最多30次 */
   @Get()
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   search(
     @Query('q') q?: string,
     @Query('sort') sort?: string,

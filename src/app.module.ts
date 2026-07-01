@@ -23,6 +23,7 @@ import { SearchModule } from './modules/search/search.module';
 import { UploadModule } from './modules/upload/upload.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { StatsModule } from './modules/stats/stats.module';
+import { AppVersionModule } from './modules/app-version/app-version.module';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { StatsModule } from './modules/stats/stats.module';
     UploadModule,
     AdminModule,
     StatsModule,
+    AppVersionModule,
   ],
   controllers: [AppController],
   providers: [

@@ -78,6 +78,8 @@ model Song {
   @@index([releaseDate])
   @@index([status])
   @@index([deletedAt])
+  @@index([title])
+  @@index([artist])
 }
 
 // 专辑表
@@ -96,6 +98,8 @@ model Album {
   songs Song[]
 
   @@index([deletedAt])
+  @@index([name])
+  @@index([artist])
 }
 
 // 歌单表
@@ -117,6 +121,7 @@ model Playlist {
   @@index([userId])
   @@index([isPublic])
   @@index([deletedAt])
+  @@index([name])
 }
 
 // 歌单-歌曲关联表
@@ -217,4 +222,27 @@ model SystemSetting {
   key       String   @unique
   value     String
   updatedAt DateTime @updatedAt
+}
+
+// App版本更新表
+model AppVersion {
+  id            String   @id @default(cuid())
+  versionCode   Int      @unique
+  versionName   String
+  title         String?
+  content       String?  // 更新内容，JSON数组字符串
+  downloadUrl   String
+  fileSize      Int      // 字节
+  md5           String?
+  forceUpdate   Boolean  @default(false)
+  minVersionCode Int     @default(0)
+  channel       String   @default("stable") // stable / beta
+  platform      String   @default("android") // android / ios / desktop
+  status        String   @default("published") // draft / published / deprecated
+  downloadCount Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([channel, platform, status])
+  @@index([versionCode])
 }

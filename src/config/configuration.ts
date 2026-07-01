@@ -4,6 +4,7 @@
  */
 export default () => ({
   port: parseInt(process.env.PORT || '3000', 10),
+  nodeEnv: process.env.NODE_ENV || 'development',
   jwt: {
     secret: process.env.JWT_SECRET || 'xt-music-dev-secret',
     expiresIn: process.env.JWT_EXPIRES || '7d',
@@ -25,5 +26,11 @@ export default () => ({
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean),
+  },
+  security: {
+    helmetEnabled: process.env.HELMET_ENABLED !== 'false',
+    hstsEnabled: process.env.HSTS_ENABLED !== 'false',
+    corsEnabled: process.env.CORS_ENABLED !== 'false',
+    trustProxy: process.env.TRUST_PROXY === 'true',
   },
 });
