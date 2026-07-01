@@ -16,10 +16,18 @@ import { STORAGE_SERVICE } from '../upload/storage.interface';
 import type { StorageService } from '../upload/storage.interface';
 import { memoryStorage } from 'multer';
 
+const toMB = (mb: number) => mb * 1024 * 1024;
+
+const envMaxSizeMB = {
+  image: parseInt(process.env.UPLOAD_MAX_SIZE_IMAGE_MB || '10', 10),
+  audio: parseInt(process.env.UPLOAD_MAX_SIZE_AUDIO_MB || '200', 10),
+  lyric: parseInt(process.env.UPLOAD_MAX_SIZE_LYRIC_MB || '5', 10),
+};
+
 /** 允许的上传分类及对应的文件限制 */
 const UPLOAD_CONFIG = {
   image: {
-    maxSize: 5 * 1024 * 1024,
+    maxSize: toMB(envMaxSizeMB.image),
     allowedMimeTypes: [
       'image/jpeg',
       'image/png',
@@ -30,7 +38,7 @@ const UPLOAD_CONFIG = {
     allowedExtensions: ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg'],
   },
   audio: {
-    maxSize: 50 * 1024 * 1024,
+    maxSize: toMB(envMaxSizeMB.audio),
     allowedMimeTypes: [
       'audio/mpeg',
       'audio/mp3',
@@ -43,7 +51,7 @@ const UPLOAD_CONFIG = {
     allowedExtensions: ['.mp3', '.flac', '.wav', '.ogg', '.m4a', '.aac'],
   },
   lyric: {
-    maxSize: 1 * 1024 * 1024,
+    maxSize: toMB(envMaxSizeMB.lyric),
     allowedMimeTypes: ['text/plain', 'application/octet-stream'],
     allowedExtensions: ['.lrc', '.txt'],
   },
