@@ -40,11 +40,18 @@ model User {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
+  /** 最近登录时间 */
+  lastLoginAt DateTime?
+  /** 累计登录次数 */
+  loginCount   Int     @default(0)
 
   playlists       Playlist[]
   favorites       Favorite[]
+  albumFavorites  AlbumFavorite[]
+  playlistFavorites PlaylistFavorite[]
   playHistories   PlayHistory[]
   downloadRecords DownloadRecord[]
+  operationLogs   OperationLog[]
 
   @@index([deletedAt])
 }
@@ -60,8 +67,12 @@ model Song {
   fileUrl     String
   coverUrl    String?
   lyricUrl    String?
+  /** 歌词正文（LRC 文本），优先于 lyricUrl 文件读取 */
+  lyricContent String?
   releaseDate DateTime
   plays       Int        @default(0)
+  /** 收藏数，收藏时 +1 / 取消时 -1 */
+  favoriteCount Int      @default(0)
   status      SongStatus @default(PUBLISHED)
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
@@ -72,6 +83,7 @@ model Song {
   favorites       Favorite[]
   playHistories   PlayHistory[]
   downloadRecords DownloadRecord[]
+  banners         Banner[]
 
   @@index([albumId])
   @@index([plays])
@@ -96,6 +108,7 @@ model Album {
   deletedAt   DateTime?
 
   songs Song[]
+  albumFavorites AlbumFavorite[]
 
   @@index([deletedAt])
   @@index([name])
@@ -111,12 +124,15 @@ model Playlist {
   userId      String
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   isPublic    Boolean   @default(true)
+  /** 系统歌单标记：官方运营歌单 */
+  isSystem    Boolean   @default(false)
   playCount   Int       @default(0)
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
 
   playlistSongs PlaylistSong[]
+  playlistFavorites PlaylistFavorite[]
 
   @@index([userId])
   @@index([isPublic])
@@ -144,13 +160,43 @@ model Banner {
   id        String       @id @default(cuid())
   title     String
   imageUrl  String
+  /** 点击跳转内部路径（优先级最低） */
   linkUrl   String?
+  /** 关联歌曲 ID：点击优先播放该歌曲（优先级最高） */
+  songId    String?
+  /** 广告外链：点击打开新窗口（优先级中） */
+  adUrl     String?
   sort      Int          @default(0)
   status    BannerStatus @default(VISIBLE)
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
 
+  song Song? @relation(fields: [songId], references: [id], onDelete: SetNull)
+
   @@index([sort, status])
+}
+
+// 操作日志表（管理后台写操作审计）
+model OperationLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  /** 冗余存储用户名，避免用户被删后无法追溯 */
+  username   String?
+  /** 操作类型：CREATE_SONG / UPDATE_SONG / DELETE_SONG / CREATE_BANNER 等 */
+  action     String
+  /** 资源类型：song / album / playlist / banner / user 等 */
+  resource   String?
+  resourceId String?
+  /** 操作详情（描述或 JSON 字符串） */
+  detail     String?
+  ip         String?
+  createdAt   DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
 }
 
 // 标签表
@@ -175,7 +221,7 @@ model SongTag {
   @@index([tagId])
 }
 
-// 收藏表
+// 收藏表（歌曲收藏）
 model Favorite {
   id        String   @id @default(cuid())
   userId    String
@@ -186,6 +232,34 @@ model Favorite {
   song Song @relation(fields: [songId], references: [id], onDelete: Cascade)
 
   @@unique([userId, songId])
+  @@index([userId])
+}
+
+// 专辑收藏表
+model AlbumFavorite {
+  id        String   @id @default(cuid())
+  userId    String
+  albumId   String
+  createdAt DateTime @default(now())
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  album Album @relation(fields: [albumId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, albumId])
+  @@index([userId])
+}
+
+// 歌单收藏表
+model PlaylistFavorite {
+  id         String   @id @default(cuid())
+  userId     String
+  playlistId String
+  createdAt  DateTime @default(now())
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  playlist Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, playlistId])
   @@index([userId])
 }
 
@@ -245,4 +319,17 @@ model AppVersion {
 
   @@index([channel, platform, status])
   @@index([versionCode])
+}
+
+// 搜索日志表（用于热门搜索词统计，按时间窗口聚合）
+// 不建立 User 外键关联，仅作为日志使用，定期清理
+model SearchLog {
+  id        String   @id @default(cuid())
+  keyword   String
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([keyword])
+  @@index([createdAt])
+  @@index([ip, createdAt])
 }

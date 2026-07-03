@@ -17,6 +17,10 @@ export interface StorageService {
   delete(path: string): Promise<void>;
   /** 根据存储路径生成可访问 URL */
   getUrl(path: string): string;
+  /** 生成预签名下载 URL（S3 返回带签名的临时直链；本地直接返回可访问 URL） */
+  presign(path: string, expiresIn?: number): Promise<string>;
+  /** 从完整 URL 反向提取存储内部 path（与 getUrl 互逆） */
+  extractPath(url: string): string;
 }
 
 /** StorageService 的 DI Token */

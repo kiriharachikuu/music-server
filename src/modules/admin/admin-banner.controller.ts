@@ -6,6 +6,7 @@ import {
   Param,
   Post,
   Put,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -22,8 +23,8 @@ export class AdminBannerController {
   constructor(private readonly resource: AdminResourceService) {}
 
   @Get()
-  list() {
-    return this.resource.listBanners();
+  list(@Query() query: { page?: string; limit?: string; pageSize?: string }) {
+    return this.resource.listBanners(query);
   }
 
   @Post()
@@ -34,6 +35,12 @@ export class AdminBannerController {
   @Put(':id')
   update(@Param('id') id: string, @Body() dto: UpdateBannerDto) {
     return this.resource.updateBanner(id, dto);
+  }
+
+  /** PUT /api/admin/banners/:id/sort 排序（上移/下移） */
+  @Put(':id/sort')
+  sort(@Param('id') id: string, @Body() dto: { direction: 'up' | 'down' }) {
+    return this.resource.sortBanner(id, dto.direction);
   }
 
   @Delete(':id')

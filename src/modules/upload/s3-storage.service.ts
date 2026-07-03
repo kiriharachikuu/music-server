@@ -2,9 +2,11 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   DeleteObjectCommand,
+  GetObjectCommand,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { randomUUID } from 'crypto';
 import * as path from 'path';
 import { StorageService, UploadResult } from './storage.interface';
@@ -64,6 +66,39 @@ export class S3StorageService implements StorageService {
     const base =
       this.publicDomain || `https://${this.bucket}.s3.amazonaws.com`;
     return `${base.replace(/\/+$/, '')}/${key.replace(/^\/+/, '')}`;
+  }
+
+  /**
+   * 生成预签名下载 URL
+   * 使用 @aws-sdk/s3-request-presigner 对 GetObjectCommand 签名
+   * 默认有效期 3600 秒（1 小时），可通过 expiresIn 自定义
+   */
+  async presign(key: string, expiresIn = 3600): Promise<string> {
+    const command = new GetObjectCommand({ Bucket: this.bucket, Key: key });
+    return getSignedUrl(this.client, command, { expiresIn });
+  }
+
+  /**
+   * 从完整 URL 反向提取 S3 对象 Key
+   * 与 getUrl 互逆：优先剥离已知 base 前缀，兜底解析 URL pathname
+   */
+  extractPath(url: string): string {
+    const clean = url.split('?')[0].split('#')[0];
+    const base = (
+      this.publicDomain || `https://${this.bucket}.s3.amazonaws.com`
+    ).replace(/\/+$/, '');
+    if (clean.startsWith(base)) {
+      return clean.slice(base.length).replace(/^\/+/, '');
+    }
+    // 兜底：path-style 或未知域名，取 URL pathname 作为 Key
+    try {
+      if (/^https?:\/\//i.test(clean)) {
+        return new URL(clean).pathname.replace(/^\/+/, '');
+      }
+    } catch {
+      // 忽略解析异常
+    }
+    return clean.replace(/^\/+/, '');
   }
 
   private currentYearMonth(): string {

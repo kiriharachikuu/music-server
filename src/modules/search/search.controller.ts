@@ -1,4 +1,5 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Query, Req } from '@nestjs/common';
+import type { Request } from 'express';
 import { Throttle } from '@nestjs/throttler';
 import { SearchService } from './search.service';
 
@@ -14,6 +15,7 @@ export class SearchController {
   @Get()
   @Throttle({ default: { limit: 30, ttl: 60000 } })
   search(
+    @Req() req: Request,
     @Query('q') q?: string,
     @Query('sort') sort?: string,
     @Query('tag') tag?: string,
@@ -21,7 +23,15 @@ export class SearchController {
     @Query('limit') limit?: string,
     @Query('pageSize') pageSize?: string,
   ) {
-    return this.searchService.search({ q, sort, tag, page, limit, pageSize });
+    return this.searchService.search({
+      q,
+      sort,
+      tag,
+      page,
+      limit,
+      pageSize,
+      ip: req.ip,
+    });
   }
 
   /** GET /api/search/hot 热门搜索词 */

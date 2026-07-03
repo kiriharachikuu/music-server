@@ -1,8 +1,18 @@
-import { Controller, Get, Query, Param, Head } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Query,
+  Param,
+  Head,
+  UseGuards,
+} from '@nestjs/common';
 import { AppVersionService } from './app-version.service';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 /**
- * App版本控制器（公开接口）
+ * App版本控制器
+ * - GET /latest 公开：版本检查可在登录前进行
+ * - HEAD /download/:id 需登录：防止匿名刷下载量
  * 路由前缀 /api/app/version
  */
 @Controller('app/version')
@@ -26,9 +36,11 @@ export class AppVersionController {
   }
 
   /**
-   * HEAD /api/app/version/download/:id 记录下载次数（轻量接口）
+   * HEAD /api/app/version/download/:id 记录下载次数
+   * 需登录鉴权，防止匿名调用刷下载量
    */
   @Head('download/:id')
+  @UseGuards(JwtAuthGuard)
   async trackDownload(@Param('id') id: string) {
     await this.appVersionService.incrementDownloadCount(id);
     return { success: true };

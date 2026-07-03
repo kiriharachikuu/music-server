@@ -16,6 +16,9 @@ services:
       JWT_EXPIRES: ${JWT_EXPIRES:-7d}
       STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
       LOCAL_STORAGE_PATH: /app/uploads
+      # 生产环境走 Nginx 反代，必须信任代理以获取真实客户端 IP
+      # （搜索日志 IP 去重、登录限流等依赖 req.ip）
+      TRUST_PROXY: "true"
       # 跨域白名单：多个用逗号分隔
       # 注意：因后端 credentials=true，不能用 *，必须列出具体域名
       # 留空时后端会走 origin:true 动态回显请求方 Origin（兼容 credentials）

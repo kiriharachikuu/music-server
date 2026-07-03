@@ -59,6 +59,11 @@ export class AuthService {
     if (!ok) {
       throw new UnauthorizedException('账号或密码错误');
     }
+    // 更新最近登录时间与累计登录次数（sanitize 返回的 user 不含这两个字段，无影响）
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { lastLoginAt: new Date(), loginCount: { increment: 1 } },
+    });
     return { token: this.signToken(user.id, user.role), user: this.sanitize(user) };
   }
 

@@ -6,6 +6,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  Patch,
   Post,
   Put,
   Query,
@@ -18,6 +19,7 @@ import { CreatePlaylistDto } from './dto/create-playlist.dto';
 import { FavoriteDto } from './dto/favorite.dto';
 import { RecordHistoryDto } from './dto/history.dto';
 import { UpdatePlaylistDto } from './dto/update-playlist.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UserService } from './user.service';
 
 /**
@@ -33,6 +35,16 @@ export class UserController {
   @Get('profile')
   getProfile(@CurrentUser('id') userId: string) {
     return this.userService.getProfile(userId);
+  }
+
+  /** PATCH /api/user/profile 更新昵称/头像 */
+  @Patch('profile')
+  @HttpCode(HttpStatus.OK)
+  updateProfile(
+    @CurrentUser('id') userId: string,
+    @Body() dto: UpdateProfileDto,
+  ) {
+    return this.userService.updateProfile(userId, dto);
   }
 
   /** GET /api/user/favorites 收藏列表 */
@@ -62,6 +74,17 @@ export class UserController {
   ) {
     const result = await this.userService.toggleFavorite(userId, songId);
     return { ...result, favorited: false };
+  }
+
+  /** GET /api/user/songs/:songId/favorite 检查是否已收藏某首歌曲 */
+  @Get('songs/:songId/favorite')
+  checkSongFavorite(
+    @CurrentUser('id') userId: string,
+    @Param('songId') songId: string,
+  ) {
+    return this.userService
+      .isSongFavorited(userId, songId)
+      .then((favorited) => ({ favorited }));
   }
 
   /** GET /api/user/playlists 我的歌单 */
@@ -106,6 +129,74 @@ export class UserController {
     return this.userService.addSongsToPlaylist(userId, id, dto.songIds);
   }
 
+  /** DELETE /api/user/playlists/:id/songs/:songId 从歌单删除歌曲 */
+  @Delete('playlists/:id/songs/:songId')
+  @HttpCode(HttpStatus.OK)
+  removeSongFromPlaylist(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+    @Param('songId') songId: string,
+  ) {
+    return this.userService.removeSongFromPlaylist(userId, id, songId);
+  }
+
+  /** PUT /api/user/playlists/:id/songs/reorder 调整歌单歌曲顺序 */
+  @Put('playlists/:id/songs/reorder')
+  @HttpCode(HttpStatus.OK)
+  reorderPlaylistSongs(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+    @Body() dto: { songIds: string[] },
+  ) {
+    return this.userService.reorderPlaylistSongs(userId, id, dto.songIds);
+  }
+
+  // ============ 专辑收藏 ============
+
+  /** POST /api/user/albums/:id/favorite 切换专辑收藏 */
+  @Post('albums/:id/favorite')
+  @HttpCode(HttpStatus.OK)
+  toggleAlbumFavorite(
+    @CurrentUser('id') userId: string,
+    @Param('id') albumId: string,
+  ) {
+    return this.userService.toggleAlbumFavorite(userId, albumId);
+  }
+
+  /** GET /api/user/albums/:id/favorite 检查是否已收藏专辑 */
+  @Get('albums/:id/favorite')
+  checkAlbumFavorite(
+    @CurrentUser('id') userId: string,
+    @Param('id') albumId: string,
+  ) {
+    return this.userService
+      .isAlbumFavorited(userId, albumId)
+      .then((favorited) => ({ favorited }));
+  }
+
+  // ============ 歌单收藏 ============
+
+  /** POST /api/user/playlists/:id/favorite 切换歌单收藏 */
+  @Post('playlists/:id/favorite')
+  @HttpCode(HttpStatus.OK)
+  togglePlaylistFavorite(
+    @CurrentUser('id') userId: string,
+    @Param('id') playlistId: string,
+  ) {
+    return this.userService.togglePlaylistFavorite(userId, playlistId);
+  }
+
+  /** GET /api/user/playlists/:id/favorite 检查是否已收藏歌单 */
+  @Get('playlists/:id/favorite')
+  checkPlaylistFavorite(
+    @CurrentUser('id') userId: string,
+    @Param('id') playlistId: string,
+  ) {
+    return this.userService
+      .isPlaylistFavorited(userId, playlistId)
+      .then((favorited) => ({ favorited }));
+  }
+
   /** GET /api/user/history 播放历史 */
   @Get('history')
   getHistory(
@@ -125,6 +216,23 @@ export class UserController {
     @Body() dto: RecordHistoryDto,
   ) {
     return this.userService.recordHistory(userId, dto.songId);
+  }
+
+  /** DELETE /api/user/history/:songId 删除单条播放历史 */
+  @Delete('history/:songId')
+  @HttpCode(HttpStatus.OK)
+  deleteHistoryItem(
+    @CurrentUser('id') userId: string,
+    @Param('songId') songId: string,
+  ) {
+    return this.userService.deleteHistoryItem(userId, songId);
+  }
+
+  /** DELETE /api/user/history 清空全部播放历史 */
+  @Delete('history')
+  @HttpCode(HttpStatus.OK)
+  clearHistory(@CurrentUser('id') userId: string) {
+    return this.userService.clearHistory(userId);
   }
 
   /** GET /api/user/downloads 下载记录 */

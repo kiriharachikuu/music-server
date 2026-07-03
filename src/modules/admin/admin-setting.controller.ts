@@ -9,7 +9,6 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { AdminService } from './admin.service';
-import { UpdateSettingsDto } from './dto/settings.dto';
 
 /** 后台系统设置 路由前缀 /api/admin/settings */
 @Controller('admin/settings')
@@ -24,7 +23,7 @@ export class AdminSettingController {
   }
 
   @Put()
-  update(@Body() dto: UpdateSettingsDto) {
-    return this.adminService.updateSettings(dto);
+  update(@Body() data: Record<string, unknown>) {
+    return this.adminService.updateSettings(data);
   }
 }

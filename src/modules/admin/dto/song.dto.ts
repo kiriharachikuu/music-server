@@ -1,4 +1,5 @@
 import {
+  ArrayMaxSize,
   IsArray,
   IsDateString,
   IsEnum,
@@ -38,6 +39,10 @@ export class CreateSongDto {
   @IsString()
   lyricUrl?: string;
 
+  @IsOptional()
+  @IsString()
+  lyricContent?: string;
+
   @IsDateString({}, { message: '发行时间格式不正确' })
   releaseDate: string;
 
@@ -47,6 +52,7 @@ export class CreateSongDto {
 
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(50, { message: '标签最多 50 个' })
   @IsString({ each: true })
   tagIds?: string[];
 }
@@ -60,6 +66,7 @@ export class UpdateSongDto {
   @IsOptional() @IsString() fileUrl?: string;
   @IsOptional() @IsString() coverUrl?: string;
   @IsOptional() @IsString() lyricUrl?: string;
+  @IsOptional() @IsString() lyricContent?: string | null;
   @IsOptional() @IsDateString() releaseDate?: string;
   @IsOptional() @IsEnum(SongStatus) status?: SongStatus;
   @IsOptional() @IsArray() @IsString({ each: true }) tagIds?: string[];

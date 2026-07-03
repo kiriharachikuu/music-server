@@ -10,6 +10,13 @@ import { CreateAlbumDto, UpdateAlbumDto } from './dto/album.dto';
 import { CreateBannerDto, UpdateBannerDto } from './dto/banner.dto';
 import { CreatePlaylistDto, UpdatePlaylistDto } from './dto/playlist.dto';
 import { CreateSongDto, UpdateSongDto } from './dto/song.dto';
+import {
+  buildAlbumUpdateData,
+  buildBannerUpdateData,
+  buildKeywordWhere,
+  buildPlaylistUpdateData,
+  readLyricFile,
+} from './admin-resource.helpers';
 
 /**
  * 后台资源 CRUD 服务
@@ -28,17 +35,9 @@ export class AdminResourceService {
     pageSize?: string;
   }): Promise<PaginatedResult<unknown>> {
     const { page, limit, skip, take } = parsePagination(query);
-    const keyword = (query.keyword ?? '').trim();
     const where = {
       deletedAt: null,
-      ...(keyword
-        ? {
-            OR: [
-              { title: { contains: keyword, mode: 'insensitive' as const } },
-              { artist: { contains: keyword, mode: 'insensitive' as const } },
-            ],
-          }
-        : {}),
+      ...buildKeywordWhere(query.keyword, ['title', 'artist']),
     };
     const [list, total] = await this.prisma.$transaction([
       this.prisma.song.findMany({
@@ -140,6 +139,51 @@ export class AdminResourceService {
           data: { songCount: { decrement: 1 } },
         });
       }
+      // 软删除不触发 Prisma 的 onDelete 级联，手动清理关联数据：
+      // - PlaylistSong / Favorite / DownloadRecord 物理删除（列表不再显示已删歌曲）
+      // - Banner.songId 置空（Banner 保留但不再关联已删歌曲）
+      // - PlayHistory 保留（历史记录），查询时通过 song.deletedAt 过滤
+      await tx.playlistSong.deleteMany({ where: { songId: id } });
+      await tx.favorite.deleteMany({ where: { songId: id } });
+      await tx.downloadRecord.deleteMany({ where: { songId: id } });
+      await tx.banner.updateMany({
+        where: { songId: id },
+        data: { songId: null },
+      });
+    });
+    return { deleted: true };
+  }
+
+  /** 获取歌词正文（管理端，不限发布状态，用于编辑器回显） */
+  async getLyricContent(id: string): Promise<{ content: string }> {
+    const song = await this.prisma.song.findFirst({
+      where: { id },
+      select: { lyricContent: true, lyricUrl: true },
+    });
+    if (!song) throw new NotFoundException('歌曲不存在');
+    // 优先返回 lyricContent；若为空则尝试读取 lyricUrl 文件
+    if (song.lyricContent) return { content: song.lyricContent };
+    return { content: await readLyricFile(song.lyricUrl) };
+  }
+
+  /** 设置歌词正文（在线编辑器保存） */
+  async setLyricContent(id: string, content: string): Promise<{ saved: true }> {
+    const song = await this.prisma.song.findFirst({ where: { id } });
+    if (!song) throw new NotFoundException('歌曲不存在');
+    await this.prisma.song.update({
+      where: { id },
+      data: { lyricContent: content || null },
+    });
+    return { saved: true };
+  }
+
+  /** 删除歌词正文（清空 lyricContent） */
+  async deleteLyricContent(id: string): Promise<{ deleted: true }> {
+    const song = await this.prisma.song.findFirst({ where: { id } });
+    if (!song) throw new NotFoundException('歌曲不存在');
+    await this.prisma.song.update({
+      where: { id },
+      data: { lyricContent: null },
     });
     return { deleted: true };
   }
@@ -162,17 +206,9 @@ export class AdminResourceService {
     pageSize?: string;
   }): Promise<PaginatedResult<unknown>> {
     const { page, limit, skip, take } = parsePagination(query);
-    const keyword = (query.keyword ?? '').trim();
     const where = {
       deletedAt: null,
-      ...(keyword
-        ? {
-            OR: [
-              { name: { contains: keyword, mode: 'insensitive' as const } },
-              { artist: { contains: keyword, mode: 'insensitive' as const } },
-            ],
-          }
-        : {}),
+      ...buildKeywordWhere(query.keyword, ['name', 'artist']),
     };
     const [list, total] = await this.prisma.$transaction([
       this.prisma.album.findMany({
@@ -202,23 +238,23 @@ export class AdminResourceService {
     await this.assertAlbumExists(id);
     return this.prisma.album.update({
       where: { id },
-      data: {
-        ...(dto.name !== undefined && { name: dto.name }),
-        ...(dto.artist !== undefined && { artist: dto.artist }),
-        ...(dto.cover !== undefined && { cover: dto.cover }),
-        ...(dto.description !== undefined && { description: dto.description }),
-        ...(dto.releaseDate !== undefined && {
-          releaseDate: new Date(dto.releaseDate),
-        }),
-      },
+      data: buildAlbumUpdateData(dto),
     });
   }
 
   async deleteAlbum(id: string): Promise<{ deleted: true }> {
     await this.assertAlbumExists(id);
-    await this.prisma.album.update({
-      where: { id },
-      data: { deletedAt: new Date() },
+    await this.prisma.$transaction(async (tx) => {
+      await tx.album.update({
+        where: { id },
+        data: { deletedAt: new Date() },
+      });
+      // 软删除不触发 Prisma 的 onDelete: SetNull，手动将关联歌曲的 albumId 置空
+      // （避免 include album 返回已删专辑，造成 ghost album 脏数据）
+      await tx.song.updateMany({
+        where: { albumId: id },
+        data: { albumId: null },
+      });
     });
     return { deleted: true };
   }
@@ -232,12 +268,9 @@ export class AdminResourceService {
     pageSize?: string;
   }): Promise<PaginatedResult<unknown>> {
     const { page, limit, skip, take } = parsePagination(query);
-    const keyword = (query.keyword ?? '').trim();
     const where = {
       deletedAt: null,
-      ...(keyword
-        ? { name: { contains: keyword, mode: 'insensitive' as const } }
-        : {}),
+      ...buildKeywordWhere(query.keyword, ['name']),
     };
     const [list, total] = await this.prisma.$transaction([
       this.prisma.playlist.findMany({
@@ -255,14 +288,15 @@ export class AdminResourceService {
     return buildPaginatedResult(list, total, page, limit);
   }
 
-  async createPlaylist(dto: CreatePlaylistDto) {
+  async createPlaylist(dto: CreatePlaylistDto, userId: string) {
     return this.prisma.playlist.create({
       data: {
         name: dto.name,
-        userId: dto.userId,
+        userId,
         cover: dto.cover,
         description: dto.description,
         isPublic: dto.isPublic ?? true,
+        isSystem: dto.isSystem ?? false,
       },
     });
   }
@@ -271,15 +305,7 @@ export class AdminResourceService {
     await this.assertPlaylistExists(id);
     return this.prisma.playlist.update({
       where: { id },
-      data: {
-        ...(dto.name !== undefined && { name: dto.name }),
-        ...(dto.cover !== undefined && { cover: dto.cover }),
-        ...(dto.description !== undefined && { description: dto.description }),
-        ...(dto.isPublic !== undefined && { isPublic: dto.isPublic }),
-        ...(dto.deletedAt !== undefined && {
-          deletedAt: dto.deletedAt ? new Date() : null,
-        }),
-      },
+      data: buildPlaylistUpdateData(dto),
     });
   }
 
@@ -292,12 +318,62 @@ export class AdminResourceService {
     return { deleted: true };
   }
 
+  /** 获取歌单详情（含歌曲列表，过滤已删歌曲避免 ghost song） */
+  async getPlaylistDetail(id: string) {
+    const playlist = await this.prisma.playlist.findFirst({
+      where: { id, deletedAt: null },
+      include: {
+        playlistSongs: {
+          orderBy: { sort: 'asc' },
+          where: { song: { deletedAt: null } },
+          include: {
+            song: { include: { album: true } },
+          },
+        },
+      },
+    });
+    if (!playlist) throw new NotFoundException('歌单不存在');
+    return playlist;
+  }
+
+  /** 批量更新歌单歌曲（覆盖式：先删除旧的，再按顺序插入） */
+  async updatePlaylistSongs(id: string, songIds: string[]): Promise<{ updated: true }> {
+    await this.assertPlaylistExists(id);
+    await this.prisma.$transaction([
+      this.prisma.playlistSong.deleteMany({ where: { playlistId: id } }),
+      ...songIds.map((songId, index) =>
+        this.prisma.playlistSong.create({
+          data: { playlistId: id, songId, sort: index + 1 },
+        }),
+      ),
+    ]);
+    return { updated: true };
+  }
+
   // ============ Banner ============
 
-  async listBanners() {
-    return this.prisma.banner.findMany({
-      orderBy: { sort: 'asc' },
-    });
+  async listBanners(query: {
+    page?: string;
+    limit?: string;
+    pageSize?: string;
+  }): Promise<PaginatedResult<unknown>> {
+    const { page, limit, skip, take } = parsePagination(query);
+    const [list, total] = await this.prisma.$transaction([
+      this.prisma.banner.findMany({
+        orderBy: { sort: 'asc' },
+        skip,
+        take,
+        // 仅 include 未删除的关联歌曲，避免 ghost song
+        include: {
+          song: {
+            where: { deletedAt: null },
+            include: { album: true },
+          },
+        },
+      }),
+      this.prisma.banner.count(),
+    ]);
+    return buildPaginatedResult(list, total, page, limit);
   }
 
   async createBanner(dto: CreateBannerDto) {
@@ -306,9 +382,12 @@ export class AdminResourceService {
         title: dto.title,
         imageUrl: dto.imageUrl,
         linkUrl: dto.linkUrl,
+        songId: dto.songId || null,
+        adUrl: dto.adUrl,
         sort: dto.sort ?? 0,
         status: dto.status ?? 'VISIBLE',
       },
+      include: { song: { include: { album: true } } },
     });
   }
 
@@ -316,13 +395,8 @@ export class AdminResourceService {
     await this.assertBannerExists(id);
     return this.prisma.banner.update({
       where: { id },
-      data: {
-        ...(dto.title !== undefined && { title: dto.title }),
-        ...(dto.imageUrl !== undefined && { imageUrl: dto.imageUrl }),
-        ...(dto.linkUrl !== undefined && { linkUrl: dto.linkUrl }),
-        ...(dto.sort !== undefined && { sort: dto.sort }),
-        ...(dto.status !== undefined && { status: dto.status }),
-      },
+      data: buildBannerUpdateData(dto),
+      include: { song: { include: { album: true } } },
     });
   }
 
@@ -330,6 +404,33 @@ export class AdminResourceService {
     await this.assertBannerExists(id);
     await this.prisma.banner.delete({ where: { id } });
     return { deleted: true };
+  }
+
+  /** 排序：与相邻 Banner 交换 sort 值 */
+  async sortBanner(id: string, direction: 'up' | 'down'): Promise<{ sorted: true }> {
+    const allBanners = await this.prisma.banner.findMany({
+      orderBy: { sort: 'asc' },
+    });
+    const index = allBanners.findIndex((b) => b.id === id);
+    if (index < 0) throw new NotFoundException('Banner 不存在');
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= allBanners.length) {
+      return { sorted: true };
+    }
+
+    const current = allBanners[index];
+    const target = allBanners[targetIndex];
+    await this.prisma.$transaction([
+      this.prisma.banner.update({
+        where: { id: current.id },
+        data: { sort: target.sort },
+      }),
+      this.prisma.banner.update({
+        where: { id: target.id },
+        data: { sort: current.sort },
+      }),
+    ]);
+    return { sorted: true };
   }
 
   // ============ 用户管理 ============
@@ -341,15 +442,10 @@ export class AdminResourceService {
     pageSize?: string;
   }): Promise<PaginatedResult<unknown>> {
     const { page, limit, skip, take } = parsePagination(query);
-    const keyword = (query.keyword ?? '').trim();
-    const where = keyword
-      ? {
-          OR: [
-            { username: { contains: keyword, mode: 'insensitive' as const } },
-            { email: { contains: keyword, mode: 'insensitive' as const } },
-          ],
-        }
-      : {};
+    const where = {
+      deletedAt: null,
+      ...buildKeywordWhere(query.keyword, ['username', 'email']),
+    };
     const [list, total] = await this.prisma.$transaction([
       this.prisma.user.findMany({
         where,
@@ -365,6 +461,13 @@ export class AdminResourceService {
           createdAt: true,
           updatedAt: true,
           deletedAt: true,
+          // 用户统计：最近登录时间、累计登录次数
+          lastLoginAt: true,
+          loginCount: true,
+          // 关联统计：收藏数、歌单数、播放历史数（total count 不受影响）
+          _count: {
+            select: { favorites: true, playlists: true, playHistories: true },
+          },
         },
       }),
       this.prisma.user.count({ where }),

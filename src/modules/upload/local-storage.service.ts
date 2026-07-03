@@ -77,6 +77,36 @@ export class LocalStorageService implements StorageService {
     return `${LocalStorageService.URL_PREFIX}/${stripped}`;
   }
 
+  /** 本地存储无需签名，直接返回可访问 URL（同步包装为 Promise） */
+  async presign(relPath: string): Promise<string> {
+    return this.getUrl(relPath);
+  }
+
+  /**
+   * 从完整 URL 反向提取存储内部相对路径
+   * 与 getUrl 互逆：fileUrl 形如 /uploads/audio/2025-07/xxx.mp3 -> audio/2025-07/xxx.mp3
+   * 兼容带 host 的完整 URL 与带 query/hash 的地址
+   */
+  extractPath(url: string): string {
+    let p = url;
+    try {
+      if (/^https?:\/\//i.test(url)) {
+        // 完整 URL：取 pathname
+        p = new URL(url).pathname;
+      } else {
+        // 相对 URL：去除 query / hash
+        p = url.split('?')[0].split('#')[0];
+      }
+    } catch {
+      p = url.split('?')[0].split('#')[0];
+    }
+    const prefix = LocalStorageService.URL_PREFIX;
+    if (p.startsWith(prefix)) {
+      return p.slice(prefix.length).replace(/^\/+/, '');
+    }
+    return p.replace(/^\/+/, '');
+  }
+
   /**
    * 净化分类目录名，防止路径遍历
    */

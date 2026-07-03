@@ -10,13 +10,16 @@ import { AdminUserController } from './admin-user.controller';
 import { AdminController } from './admin.controller';
 import { AdminResourceService } from './admin-resource.service';
 import { AdminService } from './admin.service';
+import { OperationLogModule } from '../operation-log/operation-log.module';
 
 /**
  * 后台管理模块
  * 全部接口需 JwtAuthGuard + RolesGuard(@Roles('ADMIN'))
  * StorageService 由全局 UploadModule 提供，直接注入
+ * OperationLogModule 提供 OperationLogService，便于后续在管理服务中按需注入
  */
 @Module({
+  imports: [OperationLogModule],
   controllers: [
     AdminController,
     AdminSongController,

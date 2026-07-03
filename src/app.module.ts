@@ -11,6 +11,7 @@ import { TransformInterceptor } from './common/interceptors/transform.intercepto
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import configuration from './config/configuration';
 import { winstonConfig } from './config/logger.config';
+import { OperationLogInterceptor } from './modules/operation-log/operation-log.interceptor';
 
 // 业务模块
 import { AuthModule } from './modules/auth/auth.module';
@@ -24,6 +25,7 @@ import { UploadModule } from './modules/upload/upload.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { StatsModule } from './modules/stats/stats.module';
 import { AppVersionModule } from './modules/app-version/app-version.module';
+import { OperationLogModule } from './modules/operation-log/operation-log.module';
 
 @Module({
   imports: [
@@ -47,6 +49,7 @@ import { AppVersionModule } from './modules/app-version/app-version.module';
     AdminModule,
     StatsModule,
     AppVersionModule,
+    OperationLogModule,
   ],
   controllers: [AppController],
   providers: [
@@ -55,6 +58,8 @@ import { AppVersionModule } from './modules/app-version/app-version.module';
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
     // 全局响应拦截器，包装成 { code, data, message }
     { provide: APP_INTERCEPTOR, useClass: TransformInterceptor },
+    // 全局操作日志拦截器：记录 admin 写操作（POST/PUT/DELETE），在 TransformInterceptor 之后注册
+    { provide: APP_INTERCEPTOR, useClass: OperationLogInterceptor },
     // 全局速率限制守卫
     { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
