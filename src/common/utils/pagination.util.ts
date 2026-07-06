@@ -33,6 +33,7 @@ export interface PaginatedResult<T> {
   page: number;
   limit: number;
   totalPages: number;
+  hasMore: boolean;
 }
 
 /** 构造分页返回结果 */
@@ -42,11 +43,13 @@ export function buildPaginatedResult<T>(
   page: number,
   limit: number,
 ): PaginatedResult<T> {
+  const totalPages = limit > 0 ? Math.ceil(total / limit) || 0 : 0;
   return {
     list,
     total,
     page,
     limit,
-    totalPages: limit > 0 ? Math.ceil(total / limit) || 0 : 0,
+    totalPages,
+    hasMore: page < totalPages,
   };
 }

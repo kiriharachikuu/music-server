@@ -7,13 +7,14 @@ import {
 } from '../../common/utils/pagination.util';
 
 export interface SongWithAlbum {
-  id: number;
+  id: string;
   title: string;
   artist: string;
   duration: number;
   coverUrl: string | null;
-  audioUrl: string;
-  album: { id: number; name: string } | null;
+  fileUrl: string;
+  albumName?: string;
+  album: { id: string; name: string } | null;
 }
 
 @Injectable()
@@ -46,18 +47,16 @@ export class SearchService {
     // 记录搜索词到 SearchLog（fire-and-forget，用于热门搜索词统计）
     void this.recordSearchKeyword(q, query.ip);
 
-    const searchPattern = { contains: q };
-
     const songWhere = {
       deletedAt: null,
       status: 'PUBLISHED' as const,
       OR: [
-        { title: searchPattern },
-        { artist: searchPattern },
-        { album: { name: searchPattern } },
+        { title: { contains: q } },
+        { artist: { contains: q } },
+        { album: { name: { contains: q } } },
         {
           playlistSongs: {
-            some: { playlist: { name: searchPattern } },
+            some: { playlist: { name: { contains: q } } },
           },
         },
       ],
@@ -83,7 +82,10 @@ export class SearchService {
       this.prisma.album.findMany({
         where: {
           deletedAt: null,
-          OR: [{ name: searchPattern }, { artist: searchPattern }],
+          OR: [
+            { name: { contains: q } },
+            { artist: { contains: q } },
+          ],
         },
         take: 20,
       }),
@@ -91,7 +93,7 @@ export class SearchService {
         where: {
           deletedAt: null,
           isPublic: true,
-          name: searchPattern,
+          name: { contains: q },
         },
         take: 20,
         include: {
@@ -100,15 +102,30 @@ export class SearchService {
       }),
     ]);
 
+    const mappedSongs = songs.map((song) => ({
+      ...song,
+      albumName: song.album?.name,
+    })) as unknown as SongWithAlbum[];
+
+    const artistMap = new Map<string, number>();
+    for (const song of songs) {
+      const count = artistMap.get(song.artist) ?? 0;
+      artistMap.set(song.artist, count + 1);
+    }
+    const artists = Array.from(artistMap.entries())
+      .map(([name, songCount]) => ({ name, songCount }))
+      .slice(0, 20);
+
     return {
       songs: buildPaginatedResult(
-        songs as unknown as SongWithAlbum[],
+        mappedSongs,
         songTotal,
         pagination.page,
         pagination.limit,
       ),
       albums,
       playlists,
+      artists,
     };
   }
 
