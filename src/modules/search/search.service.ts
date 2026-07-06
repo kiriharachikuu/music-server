@@ -46,19 +46,18 @@ export class SearchService {
     // 记录搜索词到 SearchLog（fire-and-forget，用于热门搜索词统计）
     void this.recordSearchKeyword(q, query.ip);
 
-    const insensitive = { contains: q, mode: 'insensitive' as const };
+    const searchPattern = { contains: q };
 
-    // 歌曲搜索条件
     const songWhere = {
       deletedAt: null,
       status: 'PUBLISHED' as const,
       OR: [
-        { title: insensitive },
-        { artist: insensitive },
-        { album: { name: insensitive } },
+        { title: searchPattern },
+        { artist: searchPattern },
+        { album: { name: searchPattern } },
         {
           playlistSongs: {
-            some: { playlist: { name: insensitive } },
+            some: { playlist: { name: searchPattern } },
           },
         },
       ],
@@ -84,7 +83,7 @@ export class SearchService {
       this.prisma.album.findMany({
         where: {
           deletedAt: null,
-          OR: [{ name: insensitive }, { artist: insensitive }],
+          OR: [{ name: searchPattern }, { artist: searchPattern }],
         },
         take: 20,
       }),
@@ -92,7 +91,7 @@ export class SearchService {
         where: {
           deletedAt: null,
           isPublic: true,
-          name: insensitive,
+          name: searchPattern,
         },
         take: 20,
         include: {
