@@ -70,7 +70,7 @@ export class StatsService {
 
   /**
    * 排行榜：3 个榜单各 50 首
-   * - soar：近 30 天发行歌曲按维度降序（飙升）
+   * - soar：近 30 天发行歌曲按维度降序（飙升）；若无近 30 天歌曲，回退到最新发行歌曲
    * - new：按维度降序（新歌榜，by=play 时退化为 releaseDate 倒序）
    * - hot：按维度降序（热歌榜）
    *
@@ -78,7 +78,7 @@ export class StatsService {
    * - 'play'：按播放量 plays 降序（new 仍按 releaseDate 倒序，新歌榜语义）
    * - 'favorite'：按收藏量 favoriteCount 降序（3 个榜单统一）
    *
-   * 注意：soar 榜始终保留近 30 天 releaseDate 条件。
+   * 注意：soar 榜优先近 30 天 releaseDate 条件，无数据时回退到最新发行歌曲。
    */
   async getRankings(by: 'play' | 'favorite' = 'play') {
     const baseWhere = { deletedAt: null, status: 'PUBLISHED' as const };
@@ -114,6 +114,16 @@ export class StatsService {
         include,
       }),
     ]);
+
+    if (soar.length === 0) {
+      const fallbackSoar = await this.prisma.song.findMany({
+        where: baseWhere,
+        orderBy: [{ releaseDate: 'desc' }, soarOrderBy],
+        take: 50,
+        include,
+      });
+      return { soar: fallbackSoar, new: newSongs, hot };
+    }
 
     return { soar, new: newSongs, hot };
   }
