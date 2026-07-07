@@ -73,13 +73,13 @@ async function main() {
     prisma.tag.create({ data: { name: '电子' } }),
   ]);
 
-  // 4. 专辑（cover 留空，前端用 Disc3 图标 fallback）
+  // 4. 专辑
   const [album1, album2] = await Promise.all([
     prisma.album.create({
       data: {
         name: '星海漫游',
         artist: '星瞳',
-        cover: null,
+        cover: 'https://picsum.photos/seed/album1/600/600',
         description: '星瞳首张录音室专辑，带你漫游浩瀚星海。',
         releaseDate: new Date('2024-05-20'),
       },
@@ -88,7 +88,7 @@ async function main() {
       data: {
         name: '霓虹之夜',
         artist: 'Synth Riders',
-        cover: null,
+        cover: 'https://picsum.photos/seed/album2/600/600',
         description: '复古合成器浪潮，点亮霓虹之夜。',
         releaseDate: new Date('2024-10-31'),
       },
@@ -220,7 +220,7 @@ async function main() {
     prisma.banner.create({
       data: {
         title: '星海漫游 新专辑上线',
-        imageUrl: '',
+        imageUrl: 'https://picsum.photos/seed/banner1/1200/400',
         linkUrl: `/album/${album1.id}`,
         sort: 1,
         status: BannerStatus.VISIBLE,
@@ -229,7 +229,7 @@ async function main() {
     prisma.banner.create({
       data: {
         title: '霓虹之夜 限时免费',
-        imageUrl: '',
+        imageUrl: 'https://picsum.photos/seed/banner2/1200/400',
         linkUrl: `/album/${album2.id}`,
         sort: 2,
         status: BannerStatus.VISIBLE,
@@ -238,7 +238,7 @@ async function main() {
     prisma.banner.create({
       data: {
         title: 'XingTone 听见宇宙',
-        imageUrl: '',
+        imageUrl: 'https://picsum.photos/seed/banner3/1200/400',
         linkUrl: '/',
         sort: 3,
         status: BannerStatus.VISIBLE,
@@ -250,7 +250,7 @@ async function main() {
   const playlist1 = await prisma.playlist.create({
     data: {
       name: '夜晚电台',
-      cover: '/uploads/covers/playlist1.png',
+      cover: 'https://picsum.photos/seed/playlist1/300/300',
       description: '适合深夜独处的旋律。',
       userId: user1.id,
       isPublic: true,
@@ -259,7 +259,7 @@ async function main() {
   const playlist2 = await prisma.playlist.create({
     data: {
       name: '通勤节拍',
-      cover: null,
+      cover: 'https://picsum.photos/seed/playlist2/300/300',
       description: '上下班路上的电子节拍。',
       userId: user2.id,
       isPublic: true,
