@@ -45,12 +45,12 @@ async function bootstrap() {
       contentSecurityPolicy: {
         directives: {
           defaultSrc: ["'self'"],
-          scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+          scriptSrc: ["'self'", "'unsafe-inline'"],
           styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
           fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
-          imgSrc: ["'self'", 'data:', 'blob:', '*'],
-          mediaSrc: ["'self'", 'blob:', '*'],
-          connectSrc: ["'self'", '*'],
+          imgSrc: ["'self'", 'data:', 'blob:'],
+          mediaSrc: ["'self'", 'blob:'],
+          connectSrc: ["'self'", 'https://hm.baidu.com'],
           frameSrc: ["'self'"],
           objectSrc: ["'none'"],
           upgradeInsecureRequests: [],
@@ -104,7 +104,12 @@ async function bootstrap() {
       configService.get<string>('storage.localStoragePath') || './uploads';
     const absRoot = path.resolve(process.cwd(), localStoragePath);
     fs.mkdirSync(absRoot, { recursive: true });
-    app.useStaticAssets(absRoot, { prefix: '/uploads/' });
+    app.useStaticAssets(absRoot, {
+      prefix: '/uploads/',
+      maxAge: '30d',
+      etag: true,
+      lastModified: true,
+    });
   }
 
   // 全局参数校验管道：白名单过滤 + 类型自动转换

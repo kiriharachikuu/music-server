@@ -11,7 +11,7 @@ import { SearchService } from './search.service';
 export class SearchController {
   constructor(private readonly searchService: SearchService) {}
 
-  /** GET /api/search?q=&sort=time|plays&tag=&page=&limit=  限制：60秒最多30次 */
+  /** GET /api/search?q=&sort=time|plays&tag=&startDate=&endDate=&page=&limit=  限制：60秒最多30次 */
   @Get()
   @Throttle({ default: { limit: 30, ttl: 60000 } })
   search(
@@ -19,6 +19,8 @@ export class SearchController {
     @Query('q') q?: string,
     @Query('sort') sort?: string,
     @Query('tag') tag?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('pageSize') pageSize?: string,
@@ -27,6 +29,8 @@ export class SearchController {
       q,
       sort,
       tag,
+      startDate,
+      endDate,
       page,
       limit,
       pageSize,

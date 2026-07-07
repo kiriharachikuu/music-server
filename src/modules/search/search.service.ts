@@ -23,11 +23,14 @@ export class SearchService {
 
   /**
    * 综合搜索：歌曲（分页） + 专辑（前20） + 歌单（前20）
+   * 支持日期范围过滤：startDate 和 endDate（格式：YYYY-MM-DD）
    */
   async search(query: {
     q?: string;
     sort?: string;
     tag?: string;
+    startDate?: string;
+    endDate?: string;
     page?: string;
     limit?: string;
     pageSize?: string;
@@ -35,6 +38,8 @@ export class SearchService {
   }) {
     const q = (query.q ?? '').trim();
     const tag = (query.tag ?? '').trim();
+    const startDate = query.startDate?.trim();
+    const endDate = query.endDate?.trim();
 
     if (!q) {
       return {
@@ -46,6 +51,8 @@ export class SearchService {
 
     // 记录搜索词到 SearchLog（fire-and-forget，用于热门搜索词统计）
     void this.recordSearchKeyword(q, query.ip);
+
+    const dateFilter = this.buildDateFilter(startDate, endDate);
 
     const songWhere = {
       deletedAt: null,
@@ -61,6 +68,7 @@ export class SearchService {
         },
       ],
       ...(tag ? { songTags: { some: { tag: { name: tag } } } } : {}),
+      ...dateFilter,
     };
 
     const orderBy =
@@ -113,7 +121,7 @@ export class SearchService {
       artistMap.set(song.artist, count + 1);
     }
     const artists = Array.from(artistMap.entries())
-      .map(([name, songCount]) => ({ name, songCount }))
+      .map(([name, songCount]) => ({ name, songCount, cover: null as string | null }))
       .slice(0, 20);
 
     return {
@@ -127,6 +135,36 @@ export class SearchService {
       playlists,
       artists,
     };
+  }
+
+  /**
+   * 构建日期范围过滤条件
+   * @param startDate 开始日期（YYYY-MM-DD）
+   * @param endDate 结束日期（YYYY-MM-DD）
+   */
+  private buildDateFilter(
+    startDate?: string,
+    endDate?: string,
+  ): Record<string, unknown> {
+    const filter: Record<string, unknown> = {};
+
+    if (startDate || endDate) {
+      filter.releaseDate = {} as Record<string, unknown>;
+
+      if (startDate) {
+        const start = new Date(startDate);
+        start.setHours(0, 0, 0, 0);
+        (filter.releaseDate as Record<string, Date>).gte = start;
+      }
+
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        (filter.releaseDate as Record<string, Date>).lte = end;
+      }
+    }
+
+    return filter;
   }
 
   /**
