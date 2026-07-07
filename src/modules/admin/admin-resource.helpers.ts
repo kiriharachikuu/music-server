@@ -5,9 +5,10 @@ import { UpdateBannerDto } from './dto/banner.dto';
 import { UpdatePlaylistDto } from './dto/playlist.dto';
 
 /**
- * 构建关键词模糊查询 where 条件（多字段 OR，insensitive 模式）
+ * 构建关键词模糊查询 where 条件（多字段 OR）
  * 无关键词时返回空对象，便于 spread 合并
  * 返回类型放宽为 any 以兼容 Prisma 各资源 WhereInput 的强类型约束
+ * 注意：不使用 mode: 'insensitive' 以兼容 SQLite（PostgreSQL/MySQL 支持）
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function buildKeywordWhere(keyword: string | undefined, fields: string[]): any {
@@ -15,7 +16,7 @@ export function buildKeywordWhere(keyword: string | undefined, fields: string[])
   if (!kw) return {};
   return {
     OR: fields.map((f) => ({
-      [f]: { contains: kw, mode: 'insensitive' as const },
+      [f]: { contains: kw },
     })),
   };
 }
