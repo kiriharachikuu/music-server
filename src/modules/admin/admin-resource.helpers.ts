@@ -42,16 +42,19 @@ export function buildAlbumUpdateData(dto: UpdateAlbumDto) {
  * deletedAt 传 truthy 表示软删除时间戳，否则置 null
  */
 export function buildPlaylistUpdateData(dto: UpdatePlaylistDto) {
-  return {
+  const data: Record<string, unknown> = {
     ...(dto.name !== undefined && { name: dto.name }),
     ...(dto.cover !== undefined && { cover: dto.cover }),
     ...(dto.description !== undefined && { description: dto.description }),
     ...(dto.isPublic !== undefined && { isPublic: dto.isPublic }),
-    ...(dto.isSystem !== undefined && { isSystem: dto.isSystem }),
     ...(dto.deletedAt !== undefined && {
       deletedAt: dto.deletedAt ? new Date() : null,
     }),
   };
+  if ('isSystem' in dto && dto.isSystem !== undefined) {
+    data.isSystem = dto.isSystem;
+  }
+  return data;
 }
 
 /**
@@ -59,18 +62,20 @@ export function buildPlaylistUpdateData(dto: UpdatePlaylistDto) {
  * songId 传空字符串表示清空关联歌曲
  */
 export function buildBannerUpdateData(dto: UpdateBannerDto) {
-  return {
+  const data: Record<string, unknown> = {
     ...(dto.title !== undefined && { title: dto.title }),
     ...(dto.imageUrl !== undefined && { imageUrl: dto.imageUrl }),
     ...(dto.linkUrl !== undefined && { linkUrl: dto.linkUrl }),
-    // 传空字符串表示清空关联歌曲
-    ...(dto.songId !== undefined && {
-      songId: dto.songId || null,
-    }),
-    ...(dto.adUrl !== undefined && { adUrl: dto.adUrl }),
     ...(dto.sort !== undefined && { sort: dto.sort }),
     ...(dto.status !== undefined && { status: dto.status }),
   };
+  if ('songId' in dto && dto.songId !== undefined) {
+    data.songId = dto.songId || null;
+  }
+  if ('adUrl' in dto && dto.adUrl !== undefined) {
+    data.adUrl = dto.adUrl;
+  }
+  return data;
 }
 
 /**
