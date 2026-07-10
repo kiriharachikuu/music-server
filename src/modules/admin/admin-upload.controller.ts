@@ -23,6 +23,7 @@ const envMaxSizeMB = {
   image: parseInt(process.env.UPLOAD_MAX_SIZE_IMAGE_MB || '10', 10),
   audio: parseInt(process.env.UPLOAD_MAX_SIZE_AUDIO_MB || '200', 10),
   lyric: parseInt(process.env.UPLOAD_MAX_SIZE_LYRIC_MB || '5', 10),
+  apk: parseInt(process.env.UPLOAD_MAX_SIZE_APK_MB || '200', 10),
 };
 
 /** 允许的上传分类及对应的文件限制 */
@@ -55,6 +56,11 @@ const UPLOAD_CONFIG = {
     maxSize: toMB(envMaxSizeMB.lyric),
     allowedMimeTypes: ['text/plain', 'application/octet-stream'],
     allowedExtensions: ['.lrc', '.txt'],
+  },
+  apk: {
+    maxSize: toMB(envMaxSizeMB.apk),
+    allowedMimeTypes: ['application/vnd.android.package-archive'],
+    allowedExtensions: ['.apk'],
   },
 } as const;
 

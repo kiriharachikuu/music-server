@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException, Inject } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateAppVersionDto } from './dto/create-app-version.dto';
 import { UpdateAppVersionDto } from './dto/update-app-version.dto';
@@ -6,10 +6,16 @@ import {
   buildPaginatedResult,
   parsePagination,
 } from '../../common/utils/pagination.util';
+import { STORAGE_SERVICE } from '../upload/storage.interface';
+import type { StorageService } from '../upload/storage.interface';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class AppVersionService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
+  ) {}
 
   /**
    * 获取最新版本（用户端检查更新用）
@@ -108,15 +114,27 @@ export class AppVersionService {
   }
 
   /**
-   * 管理后台：创建新版本
+   * 管理后台：创建新版本（支持上传APK文件）
    */
-  async createVersion(dto: CreateAppVersionDto) {
-    // 检查 versionCode 是否已存在
+  async createVersion(dto: CreateAppVersionDto, file?: Express.Multer.File) {
     const existing = await this.prisma.appVersion.findUnique({
       where: { versionCode: dto.versionCode },
     });
     if (existing) {
       throw new ConflictException('版本号已存在');
+    }
+
+    let downloadUrl = dto.downloadUrl;
+    let fileSize = dto.fileSize;
+    let md5 = dto.md5;
+
+    if (file) {
+      const uploadResult = await this.storage.upload(file, 'apk');
+      downloadUrl = uploadResult.url;
+      fileSize = file.size;
+      md5 = crypto.createHash('md5').update(file.buffer).digest('hex');
+    } else if (!downloadUrl) {
+      throw new BadRequestException('请上传APK文件或填写下载地址');
     }
 
     return this.prisma.appVersion.create({
@@ -125,9 +143,9 @@ export class AppVersionService {
         versionName: dto.versionName,
         title: dto.title,
         content: dto.content,
-        downloadUrl: dto.downloadUrl,
-        fileSize: dto.fileSize,
-        md5: dto.md5,
+        downloadUrl,
+        fileSize,
+        md5,
         forceUpdate: dto.forceUpdate ?? false,
         minVersionCode: dto.minVersionCode ?? 0,
         channel: dto.channel ?? 'stable',

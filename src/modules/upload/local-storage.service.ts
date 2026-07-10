@@ -20,6 +20,7 @@ export class LocalStorageService implements StorageService {
     'image',
     'audio',
     'lyric',
+    'apk',
     'other',
   ]);
 

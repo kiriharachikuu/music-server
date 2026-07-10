@@ -7,14 +7,18 @@ import {
   Post,
   Put,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { AppVersionService } from './app-version.service';
 import { CreateAppVersionDto } from './dto/create-app-version.dto';
 import { UpdateAppVersionDto } from './dto/update-app-version.dto';
+import { memoryStorage } from 'multer';
 
 /**
  * 后台App版本管理
@@ -42,8 +46,19 @@ export class AdminAppVersionController {
   }
 
   @Post()
-  create(@Body() dto: CreateAppVersionDto) {
-    return this.appVersionService.createVersion(dto);
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: {
+        fileSize: 200 * 1024 * 1024,
+      },
+    }),
+  )
+  create(
+    @Body() dto: CreateAppVersionDto,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    return this.appVersionService.createVersion(dto, file);
   }
 
   @Put(':id')

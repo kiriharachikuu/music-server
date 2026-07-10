@@ -6,6 +6,7 @@ import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
 import helmet from 'helmet';
 import * as fs from 'fs';
 import * as path from 'path';
+import { Request, Response, NextFunction } from 'express';
 
 import { AppModule } from './app.module';
 
@@ -48,9 +49,9 @@ async function bootstrap() {
           scriptSrc: ["'self'", "'unsafe-inline'"],
           styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
           fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
-          imgSrc: ["'self'", 'data:', 'blob:'],
-          mediaSrc: ["'self'", 'blob:'],
-          connectSrc: ["'self'", 'https://hm.baidu.com'],
+          imgSrc: ["'self'", 'data:', 'blob:', 'https://xtmusicapi.chikuu.top'],
+          mediaSrc: ["'self'", 'blob:', 'https://xtmusicapi.chikuu.top'],
+          connectSrc: ["'self'", 'https://hm.baidu.com', 'https://xtmusicapi.chikuu.top'],
           frameSrc: ["'self'"],
           objectSrc: ["'none'"],
           upgradeInsecureRequests: [],
@@ -104,6 +105,24 @@ async function bootstrap() {
       configService.get<string>('storage.localStoragePath') || './uploads';
     const absRoot = path.resolve(process.cwd(), localStoragePath);
     fs.mkdirSync(absRoot, { recursive: true });
+
+    // 为 /uploads/ 路径单独配置 CORS（静态资源不走 /api 前缀）
+    if (corsEnabled) {
+      const hasWildcard = corsOrigins.includes('*');
+      const effectiveOrigin =
+        corsOrigins.length && !hasWildcard ? corsOrigins : true;
+      app.use('/uploads', (req: Request, res: Response, next: NextFunction) => {
+        res.header('Access-Control-Allow-Origin', effectiveOrigin === true ? req.headers.origin || '*' : corsOrigins[0]);
+        res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
+        res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        res.header('Access-Control-Allow-Credentials', 'true');
+        if (req.method === 'OPTIONS') {
+          return res.sendStatus(204);
+        }
+        next();
+      });
+    }
+
     app.useStaticAssets(absRoot, {
       prefix: '/uploads/',
       maxAge: '30d',
