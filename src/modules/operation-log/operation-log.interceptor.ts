@@ -27,6 +27,7 @@ const ACTION_MAP: Record<string, string> = {
 const RESOURCE_MAP: Record<string, string> = {
   songs: 'song',
   albums: 'album',
+  artists: 'artist',
   playlists: 'playlist',
   banners: 'banner',
   users: 'user',
