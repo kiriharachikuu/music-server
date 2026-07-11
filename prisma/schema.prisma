@@ -80,6 +80,7 @@ model Song {
 
   playlistSongs   PlaylistSong[]
   songTags        SongTag[]
+  songArtists     SongArtist[]
   favorites       Favorite[]
   playHistories   PlayHistory[]
   downloadRecords DownloadRecord[]
@@ -107,7 +108,8 @@ model Album {
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
 
-  songs Song[]
+  songs         Song[]
+  albumArtists  AlbumArtist[]
   albumFavorites AlbumFavorite[]
 
   @@index([deletedAt])
@@ -319,6 +321,56 @@ model AppVersion {
 
   @@index([channel, platform, status])
   @@index([versionCode])
+}
+
+// 歌手表
+model Artist {
+  id                 String        @id @default(cuid())
+  name               String        @unique
+  avatar             String?
+  bio                String?
+  representativeWorks String?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+  deletedAt          DateTime?
+
+  songArtists        SongArtist[]
+  albumArtists       AlbumArtist[]
+
+  @@index([name])
+  @@index([deletedAt])
+}
+
+// 歌曲-歌手关联表（多对多）
+model SongArtist {
+  id        String   @id @default(cuid())
+  songId    String
+  artistId  String
+  sort      Int      @default(0)
+  createdAt DateTime @default(now())
+
+  song    Song    @relation(fields: [songId], references: [id], onDelete: Cascade)
+  artist  Artist  @relation(fields: [artistId], references: [id], onDelete: Cascade)
+
+  @@unique([songId, artistId])
+  @@index([songId])
+  @@index([artistId])
+}
+
+// 专辑-歌手关联表（多对多）
+model AlbumArtist {
+  id        String   @id @default(cuid())
+  albumId   String
+  artistId  String
+  sort      Int      @default(0)
+  createdAt DateTime @default(now())
+
+  album   Album   @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  artist  Artist  @relation(fields: [artistId], references: [id], onDelete: Cascade)
+
+  @@unique([albumId, artistId])
+  @@index([albumId])
+  @@index([artistId])
 }
 
 // 搜索日志表（用于热门搜索词统计，按时间窗口聚合）

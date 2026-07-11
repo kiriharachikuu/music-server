@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AdminAlbumController } from './admin-album.controller';
+import { AdminArtistController } from './admin-artist.controller';
 import { AdminBannerController } from './admin-banner.controller';
 import { AdminPlaylistController } from './admin-playlist.controller';
 import { AdminSettingController } from './admin-setting.controller';
@@ -25,6 +26,7 @@ import { OperationLogModule } from '../operation-log/operation-log.module';
     AdminSongController,
     AdminTagController,
     AdminAlbumController,
+    AdminArtistController,
     AdminPlaylistController,
     AdminBannerController,
     AdminUserController,

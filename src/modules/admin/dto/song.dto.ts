@@ -55,6 +55,12 @@ export class CreateSongDto {
   @ArrayMaxSize(50, { message: '标签最多 50 个' })
   @IsString({ each: true })
   tagIds?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10, { message: '歌手最多 10 个' })
+  @IsString({ each: true })
+  artistIds?: string[];
 }
 
 /** 管理后台 - 更新歌曲 DTO（全部可选） */
@@ -70,4 +76,5 @@ export class UpdateSongDto {
   @IsOptional() @IsDateString() releaseDate?: string;
   @IsOptional() @IsEnum(SongStatus) status?: SongStatus;
   @IsOptional() @IsArray() @IsString({ each: true }) tagIds?: string[];
+  @IsOptional() @IsArray() @IsString({ each: true }) artistIds?: string[];
 }

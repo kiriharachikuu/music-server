@@ -7,6 +7,7 @@ import {
 } from '../../common/utils/pagination.util';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateAlbumDto, UpdateAlbumDto } from './dto/album.dto';
+import { CreateArtistDto, UpdateArtistDto } from './dto/artist.dto';
 import { CreateBannerDto, UpdateBannerDto } from './dto/banner.dto';
 import { CreatePlaylistDto, UpdatePlaylistDto } from './dto/playlist.dto';
 import { CreateSongDto, UpdateSongDto } from './dto/song.dto';
@@ -48,6 +49,7 @@ export class AdminResourceService {
         include: {
           album: true,
           songTags: { include: { tag: true } },
+          songArtists: { include: { artist: true } },
         },
       }),
       this.prisma.song.count({ where }),
@@ -56,7 +58,7 @@ export class AdminResourceService {
   }
 
   async createSong(dto: CreateSongDto) {
-    const { tagIds, albumId, releaseDate, ...rest } = dto;
+    const { tagIds, albumId, releaseDate, artistIds, ...rest } = dto;
     return this.prisma.$transaction(async (tx) => {
       const song = await tx.song.create({
         data: {
@@ -66,8 +68,11 @@ export class AdminResourceService {
           ...(tagIds?.length
             ? { songTags: { create: tagIds.map((tagId) => ({ tagId })) } }
             : {}),
+          ...(artistIds?.length
+            ? { songArtists: { create: artistIds.map((artistId, index) => ({ artistId, sort: index })) } }
+            : {}),
         },
-        include: { album: true, songTags: { include: { tag: true } } },
+        include: { album: true, songTags: { include: { tag: true } }, songArtists: { include: { artist: true } } },
       });
       // 维护专辑歌曲数
       if (albumId) {
@@ -81,7 +86,7 @@ export class AdminResourceService {
   }
 
   async updateSong(id: string, dto: UpdateSongDto) {
-    const { tagIds, albumId, releaseDate, ...rest } = dto;
+    const { tagIds, albumId, releaseDate, artistIds, ...rest } = dto;
     return this.prisma.$transaction(async (tx) => {
       const existing = await tx.song.findFirst({ where: { id } });
       if (!existing) throw new NotFoundException('歌曲不存在');
@@ -92,6 +97,16 @@ export class AdminResourceService {
         if (tagIds.length) {
           await tx.songTag.createMany({
             data: tagIds.map((tagId) => ({ songId: id, tagId })),
+          });
+        }
+      }
+
+      // 歌手全量替换
+      if (artistIds !== undefined) {
+        await tx.songArtist.deleteMany({ where: { songId: id } });
+        if (artistIds.length) {
+          await tx.songArtist.createMany({
+            data: artistIds.map((artistId, index) => ({ songId: id, artistId, sort: index })),
           });
         }
       }
@@ -120,7 +135,7 @@ export class AdminResourceService {
           ...(albumId !== undefined && { albumId: albumId || null }),
           ...(releaseDate !== undefined && { releaseDate: new Date(releaseDate) }),
         },
-        include: { album: true, songTags: { include: { tag: true } } },
+        include: { album: true, songTags: { include: { tag: true } }, songArtists: { include: { artist: true } } },
       });
     });
   }
@@ -216,6 +231,9 @@ export class AdminResourceService {
         skip,
         take,
         orderBy: { releaseDate: 'desc' },
+        include: {
+          albumArtists: { include: { artist: true } },
+        },
       }),
       this.prisma.album.count({ where }),
     ]);
@@ -223,22 +241,37 @@ export class AdminResourceService {
   }
 
   async createAlbum(dto: CreateAlbumDto) {
+    const { artistIds, ...rest } = dto;
     return this.prisma.album.create({
       data: {
-        name: dto.name,
-        artist: dto.artist,
-        cover: dto.cover,
-        description: dto.description,
+        ...rest,
         releaseDate: new Date(dto.releaseDate),
+        ...(artistIds?.length
+          ? { albumArtists: { create: artistIds.map((artistId, index) => ({ artistId, sort: index })) } }
+          : {}),
       },
+      include: { albumArtists: { include: { artist: true } } },
     });
   }
 
   async updateAlbum(id: string, dto: UpdateAlbumDto) {
     await this.assertAlbumExists(id);
-    return this.prisma.album.update({
-      where: { id },
-      data: buildAlbumUpdateData(dto),
+    const { artistIds, ...rest } = dto;
+    return this.prisma.$transaction(async (tx) => {
+      // 歌手全量替换
+      if (artistIds !== undefined) {
+        await tx.albumArtist.deleteMany({ where: { albumId: id } });
+        if (artistIds.length) {
+          await tx.albumArtist.createMany({
+            data: artistIds.map((artistId, index) => ({ albumId: id, artistId, sort: index })),
+          });
+        }
+      }
+      return tx.album.update({
+        where: { id },
+        data: buildAlbumUpdateData(rest),
+        include: { albumArtists: { include: { artist: true } } },
+      });
     });
   }
 
@@ -505,11 +538,84 @@ export class AdminResourceService {
     });
   }
 
+  // ============ 歌手 ============
+
+  async listArtists(query: {
+    keyword?: string;
+    page?: string;
+    limit?: string;
+    pageSize?: string;
+  }): Promise<PaginatedResult<unknown>> {
+    const { page, limit, skip, take } = parsePagination(query);
+    const where = {
+      deletedAt: null,
+      ...buildKeywordWhere(query.keyword, ['name']),
+    };
+    const [list, total] = await this.prisma.$transaction([
+      this.prisma.artist.findMany({
+        where,
+        skip,
+        take,
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.artist.count({ where }),
+    ]);
+    return buildPaginatedResult(list, total, page, limit);
+  }
+
+  async createArtist(dto: CreateArtistDto) {
+    return this.prisma.artist.create({
+      data: {
+        name: dto.name,
+        avatar: dto.avatar,
+        bio: dto.bio,
+        representativeWorks: dto.representativeWorks,
+      },
+    });
+  }
+
+  async updateArtist(id: string, dto: UpdateArtistDto) {
+    await this.assertArtistExists(id);
+    return this.prisma.artist.update({
+      where: { id },
+      data: {
+        ...(dto.name !== undefined && { name: dto.name }),
+        ...(dto.avatar !== undefined && { avatar: dto.avatar }),
+        ...(dto.bio !== undefined && { bio: dto.bio }),
+        ...(dto.representativeWorks !== undefined && { representativeWorks: dto.representativeWorks }),
+      },
+    });
+  }
+
+  async deleteArtist(id: string): Promise<{ deleted: true }> {
+    await this.assertArtistExists(id);
+    await this.prisma.$transaction(async (tx) => {
+      await tx.artist.update({
+        where: { id },
+        data: { deletedAt: new Date() },
+      });
+    });
+    return { deleted: true };
+  }
+
+  async getArtistDetail(id: string) {
+    const artist = await this.prisma.artist.findFirst({
+      where: { id, deletedAt: null },
+    });
+    if (!artist) throw new NotFoundException('歌手不存在');
+    return artist;
+  }
+
   // ============ 存在性校验 ============
 
   private async assertAlbumExists(id: string) {
     const album = await this.prisma.album.findFirst({ where: { id } });
     if (!album) throw new NotFoundException('专辑不存在');
+  }
+
+  private async assertArtistExists(id: string) {
+    const artist = await this.prisma.artist.findFirst({ where: { id } });
+    if (!artist) throw new NotFoundException('歌手不存在');
   }
 
   private async assertPlaylistExists(id: string) {
