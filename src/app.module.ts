@@ -25,6 +25,7 @@ import { UploadModule } from './modules/upload/upload.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { StatsModule } from './modules/stats/stats.module';
 import { AppVersionModule } from './modules/app-version/app-version.module';
+import { ArtistModule } from './modules/artist/artist.module';
 import { OperationLogModule } from './modules/operation-log/operation-log.module';
 
 @Module({
@@ -49,6 +50,7 @@ import { OperationLogModule } from './modules/operation-log/operation-log.module
     AdminModule,
     StatsModule,
     AppVersionModule,
+    ArtistModule,
     OperationLogModule,
   ],
   controllers: [AppController],

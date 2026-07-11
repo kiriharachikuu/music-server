@@ -46,6 +46,7 @@ export class SearchService {
         songs: buildPaginatedResult<SongWithAlbum>([], 0, 1, 20),
         albums: [],
         playlists: [],
+        artists: [],
       };
     }
 
@@ -78,7 +79,7 @@ export class SearchService {
 
     const pagination = parsePagination(query);
 
-    const [songTotal, songs, albums, playlists] = await Promise.all([
+    const [songTotal, songs, albums, playlists, dbArtists] = await Promise.all([
       this.prisma.song.count({ where: songWhere }),
       this.prisma.song.findMany({
         where: songWhere,
@@ -108,6 +109,14 @@ export class SearchService {
           user: { select: { id: true, username: true, avatar: true } },
         },
       }),
+      this.prisma.artist.findMany({
+        where: {
+          deletedAt: null,
+          name: { contains: q },
+        },
+        take: 20,
+        select: { id: true, name: true, avatar: true },
+      }),
     ]);
 
     const mappedSongs = songs.map((song) => ({
@@ -115,14 +124,24 @@ export class SearchService {
       albumName: song.album?.name,
     })) as unknown as SongWithAlbum[];
 
-    const artistMap = new Map<string, number>();
-    for (const song of songs) {
-      const count = artistMap.get(song.artist) ?? 0;
-      artistMap.set(song.artist, count + 1);
-    }
-    const artists = Array.from(artistMap.entries())
-      .map(([name, songCount]) => ({ name, songCount, cover: null as string | null }))
-      .slice(0, 20);
+    const artists = dbArtists.length > 0
+      ? dbArtists.map((a) => ({
+          id: a.id,
+          name: a.name,
+          cover: a.avatar,
+          avatar: a.avatar,
+          songCount: 0,
+        }))
+      : (() => {
+          const map = new Map<string, number>();
+          for (const song of songs) {
+            const count = map.get(song.artist) ?? 0;
+            map.set(song.artist, count + 1);
+          }
+          return Array.from(map.entries())
+            .map(([name, songCount]) => ({ id: undefined, name, songCount, cover: null as string | null, avatar: null as string | null }))
+            .slice(0, 20);
+        })();
 
     return {
       songs: buildPaginatedResult(
