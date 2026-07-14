@@ -1,6 +1,10 @@
 # XingTone Server
 
+> 当前版本：0.3.1
+
 NestJS 后端 API 服务，为 XingTone 音乐播放器提供数据与认证支撑。
+
+完整文档请参考 [docs 目录](../docs/README.md)。
 
 ## 技术栈
 
