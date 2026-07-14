@@ -14,6 +14,6 @@ import { STORAGE_SERVICE } from './storage.interface';
     },
     AudioProcessService,
   ],
-  exports: [STORAGE_SERVICE, AudioProcessService],
+  exports: [STORAGE_SERVICE, AudioProcessService, StorageConfigService],
 })
 export class UploadModule {}
