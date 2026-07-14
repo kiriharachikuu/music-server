@@ -15,6 +15,11 @@ export class CreateArtistDto {
   @IsOptional()
   @IsString()
   representativeWorks?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  songIds?: string[];
 }
 
 export class UpdateArtistDto {
@@ -33,4 +38,9 @@ export class UpdateArtistDto {
   @IsOptional()
   @IsString()
   representativeWorks?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  songIds?: string[];
 }

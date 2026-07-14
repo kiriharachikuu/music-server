@@ -73,15 +73,15 @@ export class AdminService {
   private async fetchWeeklyTrend(): Promise<
     { date: string; plays: number }[]
   > {
-    // SQLite 兼容的日期分组查询
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setHours(0, 0, 0, 0);
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
+    const startStr = sevenDaysAgo.toISOString();
 
     const raw = await this.prisma.$queryRaw`
       SELECT strftime('%Y-%m-%d', "playTime") AS day, COUNT(*) as count
       FROM "PlayHistory"
-      WHERE "playTime" >= ${sevenDaysAgo}
+      WHERE "playTime" >= ${startStr}
       GROUP BY day
       ORDER BY day ASC
     `;

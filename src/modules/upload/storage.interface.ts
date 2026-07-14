@@ -11,8 +11,8 @@ export interface UploadResult {
  * 本地存储与 S3 存储均实现该接口，由工厂按配置注入具体实现
  */
 export interface StorageService {
-  /** 上传文件到指定分类目录 */
-  upload(file: Express.Multer.File, category: string): Promise<UploadResult>;
+  /** 上传文件到指定分类目录，可指定子路径（如 avatars/{userId}） */
+  upload(file: Express.Multer.File, category: string, subPath?: string): Promise<UploadResult>;
   /** 删除指定路径的文件 */
   delete(path: string): Promise<void>;
   /** 根据存储路径生成可访问 URL */

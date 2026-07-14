@@ -27,7 +27,7 @@ export class StatsService {
    * - featuredPlaylists：按 playCount 降序 6 个
    */
   async getDiscover() {
-    const [banners, dailyRecommendPool, newSongs, featuredPlaylists] =
+    const [banners, dailyRecommendPool, newSongs, featuredPlaylists, hotArtists] =
       await Promise.all([
         this.prisma.banner.findMany({
           where: { status: 'VISIBLE' },
@@ -57,14 +57,30 @@ export class StatsService {
             user: { select: { id: true, username: true, avatar: true } },
           },
         }),
+        this.prisma.artist.findMany({
+          where: { deletedAt: null },
+          orderBy: { createdAt: 'desc' },
+          take: 12,
+          include: {
+            _count: {
+              select: { songArtists: { where: { song: { deletedAt: null, status: 'PUBLISHED' } } } },
+            },
+          },
+        }),
       ]);
 
     return {
       banners,
-      // 每日推荐：从最新 50 首中随机抽取 30 首
       dailyRecommend: this.shuffle(dailyRecommendPool).slice(0, 30),
       newSongs,
       featuredPlaylists,
+      hotArtists: hotArtists.map((a) => ({
+        id: a.id,
+        name: a.name,
+        avatar: a.avatar,
+        cover: a.avatar,
+        songCount: a._count.songArtists,
+      })),
     };
   }
 

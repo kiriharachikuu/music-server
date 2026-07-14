@@ -1,19 +1,27 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
   Get,
   HttpCode,
   HttpStatus,
+  Inject,
   Param,
   Patch,
   Post,
   Put,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { STORAGE_SERVICE } from '../upload/storage.interface';
+import type { StorageService } from '../upload/storage.interface';
 import { AddSongsToPlaylistDto } from './dto/add-songs.dto';
 import { CreatePlaylistDto } from './dto/create-playlist.dto';
 import { FavoriteDto } from './dto/favorite.dto';
@@ -22,6 +30,10 @@ import { UpdatePlaylistDto } from './dto/update-playlist.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UserService } from './user.service';
 
+const IMAGE_MAX_SIZE = parseInt(process.env.UPLOAD_MAX_SIZE_IMAGE_MB || '10', 10) * 1024 * 1024;
+const IMAGE_ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
+const IMAGE_ALLOWED_EXT = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp']);
+
 /**
  * 用户接口控制器
  * 路由前缀 /api/user，全部需要 JWT 鉴权
@@ -29,7 +41,10 @@ import { UserService } from './user.service';
 @Controller('user')
 @UseGuards(JwtAuthGuard)
 export class UserController {
-  constructor(private readonly userService: UserService) {}
+  constructor(
+    private readonly userService: UserService,
+    @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
+  ) {}
 
   /** GET /api/user/profile 当前用户资料 */
   @Get('profile')
@@ -45,6 +60,22 @@ export class UserController {
     @Body() dto: UpdateProfileDto,
   ) {
     return this.userService.updateProfile(userId, dto);
+  }
+
+  /** POST /api/user/upload/avatar 上传用户头像（multipart, 字段名 file） */
+  @Post('upload/avatar')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: IMAGE_MAX_SIZE },
+    }),
+  )
+  async uploadAvatar(
+    @CurrentUser('id') userId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    this.validateImage(file);
+    return this.storage.upload(file, 'avatars', userId);
   }
 
   /** GET /api/user/favorites 收藏列表 */
@@ -116,6 +147,24 @@ export class UserController {
   @Delete('playlists/:id')
   deletePlaylist(@CurrentUser('id') userId: string, @Param('id') id: string) {
     return this.userService.deletePlaylist(userId, id);
+  }
+
+  /** POST /api/user/playlists/:id/cover 上传歌单封面（multipart, 字段名 file） */
+  @Post('playlists/:id/cover')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: IMAGE_MAX_SIZE },
+    }),
+  )
+  async uploadPlaylistCover(
+    @CurrentUser('id') userId: string,
+    @Param('id') playlistId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    await this.userService.assertPlaylistOwned(userId, playlistId);
+    this.validateImage(file);
+    return this.storage.upload(file, 'playlists', playlistId);
   }
 
   /** POST /api/user/playlists/:id/songs 批量添加歌曲 */
@@ -244,5 +293,28 @@ export class UserController {
     @Query('pageSize') pageSize?: string,
   ) {
     return this.userService.getDownloads(userId, { page, limit, pageSize });
+  }
+
+  /** 校验上传的图片文件（大小、MIME、扩展名） */
+  private validateImage(file: Express.Multer.File) {
+    if (!file) {
+      throw new BadRequestException('文件不能为空');
+    }
+    if (file.size > IMAGE_MAX_SIZE) {
+      const sizeMB = (IMAGE_MAX_SIZE / 1024 / 1024).toFixed(0);
+      throw new BadRequestException(`文件过大，图片最大支持 ${sizeMB}MB`);
+    }
+    const mimeType = file.mimetype.toLowerCase();
+    if (!IMAGE_ALLOWED_MIME.has(mimeType)) {
+      throw new BadRequestException(
+        `不支持的图片格式，允许：${Array.from(IMAGE_ALLOWED_EXT).join('、')}`,
+      );
+    }
+    const ext = (file.originalname.slice(file.originalname.lastIndexOf('.')) || '').toLowerCase();
+    if (!IMAGE_ALLOWED_EXT.has(ext)) {
+      throw new BadRequestException(
+        `不支持的图片扩展名，允许：${Array.from(IMAGE_ALLOWED_EXT).join('、')}`,
+      );
+    }
   }
 }

@@ -27,6 +27,7 @@ const URL_FIELDS = [
   { model: 'song', field: 'coverUrl' },
   { model: 'song', field: 'lyricUrl' },
   { model: 'album', field: 'cover' },
+  { model: 'artist', field: 'avatar' },
   { model: 'playlist', field: 'cover' },
   { model: 'banner', field: 'imageUrl' },
   { model: 'user', field: 'avatar' },

@@ -18,6 +18,7 @@ interface StorageClient {
   upload(
     file: Express.Multer.File,
     category: string,
+    subPath?: string,
   ): Promise<UploadResult>;
   delete(key: string): Promise<void>;
   getUrl(key: string): string;
@@ -86,20 +87,25 @@ export class DynamicStorageService implements StorageService {
     };
 
     return {
-      async upload(file: Express.Multer.File, category: string): Promise<UploadResult> {
+      async upload(file: Express.Multer.File, category: string, subPath?: string): Promise<UploadResult> {
         const safeCategory = sanitizeCategory(category);
-        const ym = currentYearMonth();
         const safeExt = sanitizeExtension(file.originalname);
         const filename = `${randomUUID()}${safeExt}`;
-        const dir = path.join(root, safeCategory, ym);
-        const absPath = path.join(dir, filename);
-        const resolvedDir = path.resolve(dir);
+        let relPath: string;
+        if (subPath) {
+          const safeSub = subPath.replace(/[^a-zA-Z0-9/_-]/g, '');
+          relPath = `${safeCategory}/${safeSub}/${filename}`;
+        } else {
+          const ym = currentYearMonth();
+          relPath = `${safeCategory}/${ym}/${filename}`;
+        }
+        const absPath = path.join(root, relPath);
+        const resolvedDir = path.resolve(path.dirname(absPath));
         if (!resolvedDir.startsWith(root)) {
           throw new Error('非法的文件路径');
         }
-        await fs.mkdir(dir, { recursive: true });
+        await fs.mkdir(path.dirname(absPath), { recursive: true });
         await fs.writeFile(absPath, file.buffer);
-        const relPath = `${safeCategory}/${ym}/${filename}`;
         return { url: `${URL_PREFIX}/${relPath}`, path: relPath };
       },
 
@@ -162,10 +168,16 @@ export class DynamicStorageService implements StorageService {
     };
 
     return {
-      async upload(file: Express.Multer.File, category: string): Promise<UploadResult> {
-        const ym = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+      async upload(file: Express.Multer.File, category: string, subPath?: string): Promise<UploadResult> {
         const ext = path.extname(file.originalname) || '';
-        const key = `${category}/${ym}/${randomUUID()}${ext}`;
+        let key: string;
+        if (subPath) {
+          const safeSub = subPath.replace(/[^a-zA-Z0-9/_-]/g, '');
+          key = `${category}/${safeSub}/${randomUUID()}${ext}`;
+        } else {
+          const ym = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+          key = `${category}/${ym}/${randomUUID()}${ext}`;
+        }
         await s3.send(new PutObjectCommand({
           Bucket: bucket, Key: key, Body: file.buffer, ContentType: guessContentType(file.originalname),
         }));
@@ -224,10 +236,16 @@ export class DynamicStorageService implements StorageService {
       `https://${bucket}.cos.${region}.myqcloud.com/${key.replace(/^\/+/, '')}`;
 
     return {
-      async upload(file: Express.Multer.File, category: string): Promise<UploadResult> {
-        const ym = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+      async upload(file: Express.Multer.File, category: string, subPath?: string): Promise<UploadResult> {
         const ext = path.extname(file.originalname) || '';
-        const key = `${category}/${ym}/${randomUUID()}${ext}`;
+        let key: string;
+        if (subPath) {
+          const safeSub = subPath.replace(/[^a-zA-Z0-9/_-]/g, '');
+          key = `${category}/${safeSub}/${randomUUID()}${ext}`;
+        } else {
+          const ym = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+          key = `${category}/${ym}/${randomUUID()}${ext}`;
+        }
         await new Promise<void>((resolve, reject) => {
           cos.putObject({
             Bucket: bucket, Region: region, Key: key,
@@ -269,9 +287,9 @@ export class DynamicStorageService implements StorageService {
     };
   }
 
-  async upload(file: Express.Multer.File, category: string): Promise<UploadResult> {
+  async upload(file: Express.Multer.File, category: string, subPath?: string): Promise<UploadResult> {
     const client = await this.getClient();
-    return client.upload(file, category);
+    return client.upload(file, category, subPath);
   }
 
   async delete(key: string): Promise<void> {

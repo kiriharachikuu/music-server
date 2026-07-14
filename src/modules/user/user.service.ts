@@ -144,7 +144,7 @@ export class UserService {
 
   /** 更新歌单（校验归属） */
   async updatePlaylist(userId: string, id: string, dto: UpdatePlaylistDto) {
-    const playlist = await this.assertOwned(userId, id);
+    const playlist = await this.assertPlaylistOwned(userId, id);
     return this.prisma.playlist.update({
       where: { id: playlist.id },
       data: {
@@ -158,7 +158,7 @@ export class UserService {
 
   /** 删除歌单（校验归属，软删除） */
   async deletePlaylist(userId: string, id: string): Promise<{ deleted: true }> {
-    const playlist = await this.assertOwned(userId, id);
+    const playlist = await this.assertPlaylistOwned(userId, id);
     await this.prisma.playlist.update({
       where: { id: playlist.id },
       data: { deletedAt: new Date() },
@@ -172,7 +172,7 @@ export class UserService {
     id: string,
     songIds: string[],
   ): Promise<{ added: number }> {
-    const playlist = await this.assertOwned(userId, id);
+    const playlist = await this.assertPlaylistOwned(userId, id);
     // 取当前最大 sort
     const last = await this.prisma.playlistSong.findFirst({
       where: { playlistId: playlist.id },
@@ -209,7 +209,7 @@ export class UserService {
     id: string,
     songId: string,
   ): Promise<{ removed: true }> {
-    const playlist = await this.assertOwned(userId, id);
+    const playlist = await this.assertPlaylistOwned(userId, id);
     await this.prisma.playlistSong.deleteMany({
       where: { playlistId: playlist.id, songId },
     });
@@ -222,7 +222,7 @@ export class UserService {
     id: string,
     songIds: string[],
   ): Promise<{ reordered: true }> {
-    const playlist = await this.assertOwned(userId, id);
+    const playlist = await this.assertPlaylistOwned(userId, id);
     await this.prisma.$transaction(
       songIds.map((songId, index) =>
         this.prisma.playlistSong.updateMany({
@@ -444,7 +444,7 @@ export class UserService {
   }
 
   /** 校验歌单归属当前用户，返回未软删除的歌单 */
-  private async assertOwned(userId: string, id: string) {
+  async assertPlaylistOwned(userId: string, id: string) {
     const playlist = await this.prisma.playlist.findFirst({
       where: { id, userId, deletedAt: null },
     });

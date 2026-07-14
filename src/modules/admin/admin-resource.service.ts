@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { PrismaClient, Role } from '@prisma/client';
 import {
   buildPaginatedResult,
   PaginatedResult,
@@ -60,9 +60,20 @@ export class AdminResourceService {
   async createSong(dto: CreateSongDto) {
     const { tagIds, albumId, releaseDate, artistIds, ...rest } = dto;
     return this.prisma.$transaction(async (tx) => {
+      let artistDisplay = rest.artist;
+      if (artistIds?.length) {
+        const artists = await tx.artist.findMany({
+          where: { id: { in: artistIds } },
+          select: { id: true, name: true },
+        });
+        const sorted = artistIds.map((id) => artists.find((a) => a.id === id)?.name).filter(Boolean) as string[];
+        if (sorted.length) artistDisplay = sorted.join(' / ');
+      }
+
       const song = await tx.song.create({
         data: {
           ...rest,
+          artist: artistDisplay,
           albumId: albumId || null,
           releaseDate: new Date(releaseDate),
           ...(tagIds?.length
@@ -101,13 +112,22 @@ export class AdminResourceService {
         }
       }
 
-      // 歌手全量替换
+      // 歌手全量替换 + 派生 artist 显示字段
+      let artistDisplay: string | undefined = undefined;
       if (artistIds !== undefined) {
         await tx.songArtist.deleteMany({ where: { songId: id } });
         if (artistIds.length) {
           await tx.songArtist.createMany({
             data: artistIds.map((artistId, index) => ({ songId: id, artistId, sort: index })),
           });
+          const artists = await tx.artist.findMany({
+            where: { id: { in: artistIds } },
+            select: { id: true, name: true },
+          });
+          const sorted = artistIds.map((aid) => artists.find((a) => a.id === aid)?.name).filter(Boolean) as string[];
+          if (sorted.length) artistDisplay = sorted.join(' / ');
+        } else {
+          artistDisplay = '';
         }
       }
 
@@ -132,6 +152,7 @@ export class AdminResourceService {
         where: { id },
         data: {
           ...rest,
+          ...(artistDisplay !== undefined && { artist: artistDisplay }),
           ...(albumId !== undefined && { albumId: albumId || null }),
           ...(releaseDate !== undefined && { releaseDate: new Date(releaseDate) }),
         },
@@ -242,15 +263,27 @@ export class AdminResourceService {
 
   async createAlbum(dto: CreateAlbumDto) {
     const { artistIds, ...rest } = dto;
-    return this.prisma.album.create({
-      data: {
-        ...rest,
-        releaseDate: new Date(dto.releaseDate),
-        ...(artistIds?.length
-          ? { albumArtists: { create: artistIds.map((artistId, index) => ({ artistId, sort: index })) } }
-          : {}),
-      },
-      include: { albumArtists: { include: { artist: true } } },
+    return this.prisma.$transaction(async (tx) => {
+      let artistDisplay = rest.artist;
+      if (artistIds?.length) {
+        const artists = await tx.artist.findMany({
+          where: { id: { in: artistIds } },
+          select: { id: true, name: true },
+        });
+        const sorted = artistIds.map((id) => artists.find((a) => a.id === id)?.name).filter(Boolean) as string[];
+        if (sorted.length) artistDisplay = sorted.join(' / ');
+      }
+      return tx.album.create({
+        data: {
+          ...rest,
+          artist: artistDisplay,
+          releaseDate: new Date(dto.releaseDate),
+          ...(artistIds?.length
+            ? { albumArtists: { create: artistIds.map((artistId, index) => ({ artistId, sort: index })) } }
+            : {}),
+        },
+        include: { albumArtists: { include: { artist: true } } },
+      });
     });
   }
 
@@ -258,18 +291,30 @@ export class AdminResourceService {
     await this.assertAlbumExists(id);
     const { artistIds, ...rest } = dto;
     return this.prisma.$transaction(async (tx) => {
-      // 歌手全量替换
+      let artistDisplay: string | undefined = undefined;
       if (artistIds !== undefined) {
         await tx.albumArtist.deleteMany({ where: { albumId: id } });
         if (artistIds.length) {
           await tx.albumArtist.createMany({
             data: artistIds.map((artistId, index) => ({ albumId: id, artistId, sort: index })),
           });
+          const artists = await tx.artist.findMany({
+            where: { id: { in: artistIds } },
+            select: { id: true, name: true },
+          });
+          const sorted = artistIds.map((aid) => artists.find((a) => a.id === aid)?.name).filter(Boolean) as string[];
+          if (sorted.length) artistDisplay = sorted.join(' / ');
+        } else {
+          artistDisplay = '';
         }
+      }
+      const updateData = buildAlbumUpdateData(rest);
+      if (artistDisplay !== undefined) {
+        (updateData as any).artist = artistDisplay;
       }
       return tx.album.update({
         where: { id },
-        data: buildAlbumUpdateData(rest),
+        data: updateData,
         include: { albumArtists: { include: { artist: true } } },
       });
     });
@@ -564,26 +609,71 @@ export class AdminResourceService {
   }
 
   async createArtist(dto: CreateArtistDto) {
-    return this.prisma.artist.create({
-      data: {
-        name: dto.name,
-        avatar: dto.avatar,
-        bio: dto.bio,
-        representativeWorks: dto.representativeWorks,
-      },
+    const { songIds, ...data } = dto;
+    return this.prisma.$transaction(async (tx) => {
+      const artist = await tx.artist.create({
+        data: {
+          ...data,
+          ...(songIds?.length
+            ? {
+                songArtists: {
+                  create: songIds.map((songId, index) => ({ songId, sort: index })),
+                },
+              }
+            : {}),
+        },
+      });
+      if (songIds?.length) {
+        await this.refreshSongArtistDisplay(tx, songIds);
+      }
+      return artist;
     });
   }
 
   async updateArtist(id: string, dto: UpdateArtistDto) {
     await this.assertArtistExists(id);
-    return this.prisma.artist.update({
-      where: { id },
-      data: {
-        ...(dto.name !== undefined && { name: dto.name }),
-        ...(dto.avatar !== undefined && { avatar: dto.avatar }),
-        ...(dto.bio !== undefined && { bio: dto.bio }),
-        ...(dto.representativeWorks !== undefined && { representativeWorks: dto.representativeWorks }),
-      },
+    const { songIds, ...data } = dto;
+    return this.prisma.$transaction(async (tx) => {
+      const artist = await tx.artist.update({
+        where: { id },
+        data: {
+          ...(data.name !== undefined && { name: data.name }),
+          ...(data.avatar !== undefined && { avatar: data.avatar }),
+          ...(data.bio !== undefined && { bio: data.bio }),
+          ...(data.representativeWorks !== undefined && { representativeWorks: data.representativeWorks }),
+        },
+      });
+
+      const affectedSongIds = new Set<string>();
+
+      if (songIds !== undefined) {
+        const oldRelations = await tx.songArtist.findMany({
+          where: { artistId: id },
+          select: { songId: true },
+        });
+        oldRelations.forEach((r) => affectedSongIds.add(r.songId));
+        songIds.forEach((sid) => affectedSongIds.add(sid));
+
+        await tx.songArtist.deleteMany({ where: { artistId: id } });
+        if (songIds.length) {
+          await tx.songArtist.createMany({
+            data: songIds.map((songId, index) => ({ songId, artistId: id, sort: index })),
+          });
+        }
+        if (affectedSongIds.size) {
+          await this.refreshSongArtistDisplay(tx, Array.from(affectedSongIds));
+        }
+      } else if (data.name !== undefined) {
+        const related = await tx.songArtist.findMany({
+          where: { artistId: id },
+          select: { songId: true },
+        });
+        if (related.length) {
+          await this.refreshSongArtistDisplay(tx, related.map((r) => r.songId));
+        }
+      }
+
+      return artist;
     });
   }
 
@@ -601,9 +691,48 @@ export class AdminResourceService {
   async getArtistDetail(id: string) {
     const artist = await this.prisma.artist.findFirst({
       where: { id, deletedAt: null },
+      include: {
+        songArtists: {
+          include: { song: { select: { id: true, title: true } } },
+          orderBy: { sort: 'asc' },
+        },
+      },
     });
     if (!artist) throw new NotFoundException('歌手不存在');
     return artist;
+  }
+
+  // ============ 辅助方法 ============
+
+  private async refreshSongArtistDisplay(
+    tx: any,
+    songIds: string[],
+  ) {
+    if (!songIds.length) return;
+    const relations = await tx.songArtist.findMany({
+      where: { songId: { in: songIds } },
+      include: { artist: { select: { id: true, name: true } } },
+      orderBy: { sort: 'asc' },
+    });
+    const bySong = new Map<string, string[]>();
+    for (const rel of relations) {
+      const list = bySong.get(rel.songId) ?? [];
+      list.push(rel.artist.name);
+      bySong.set(rel.songId, list);
+    }
+    for (const [songId, names] of bySong) {
+      await tx.song.update({
+        where: { id: songId },
+        data: { artist: names.join(' / ') },
+      });
+    }
+    const noArtist = songIds.filter((id) => !bySong.has(id));
+    if (noArtist.length) {
+      await tx.song.updateMany({
+        where: { id: { in: noArtist } },
+        data: { artist: '' },
+      });
+    }
   }
 
   // ============ 存在性校验 ============
