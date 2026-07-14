@@ -22,14 +22,14 @@ export class S3StorageService implements StorageService {
   private readonly publicDomain: string;
 
   constructor(config: ConfigService) {
-    this.bucket = config.get<string>('storage.s3.bucket') || '';
-    this.publicDomain = config.get<string>('storage.s3.publicDomain') || '';
+    this.bucket = config.get<string>('storage.bucket') || '';
+    this.publicDomain = config.get<string>('storage.publicDomain') || '';
     this.client = new S3Client({
-      region: config.get<string>('storage.s3.region') || undefined,
-      endpoint: config.get<string>('storage.s3.endpoint') || undefined,
+      region: config.get<string>('storage.region') || undefined,
+      endpoint: config.get<string>('storage.endpoint') || undefined,
       credentials: {
-        accessKeyId: config.get<string>('storage.s3.accessKey') || '',
-        secretAccessKey: config.get<string>('storage.s3.secretKey') || '',
+        accessKeyId: config.get<string>('storage.secretId') || '',
+        secretAccessKey: config.get<string>('storage.secretKey') || '',
       },
     });
   }

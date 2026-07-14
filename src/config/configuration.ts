@@ -12,14 +12,13 @@ export default () => ({
   storage: {
     driver: process.env.STORAGE_DRIVER || 'local',
     localStoragePath: process.env.LOCAL_STORAGE_PATH || './uploads',
-    s3: {
-      endpoint: process.env.S3_ENDPOINT || '',
-      bucket: process.env.S3_BUCKET || '',
-      accessKey: process.env.S3_ACCESS_KEY || '',
-      secretKey: process.env.S3_SECRET_KEY || '',
-      region: process.env.S3_REGION || '',
-      publicDomain: process.env.S3_PUBLIC_DOMAIN || '',
-    },
+    bucket: process.env.STORAGE_BUCKET || '',
+    region: process.env.STORAGE_REGION || '',
+    secretId: process.env.STORAGE_SECRET_ID || '',
+    secretKey: process.env.STORAGE_SECRET_KEY || '',
+    sessionToken: process.env.STORAGE_SESSION_TOKEN || '',
+    endpoint: process.env.STORAGE_ENDPOINT || '',
+    publicDomain: process.env.STORAGE_PUBLIC_DOMAIN || '',
   },
   cors: {
     origins: (process.env.CORS_ORIGINS || '')

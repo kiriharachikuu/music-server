@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AdminAlbumController } from './admin-album.controller';
 import { AdminArtistController } from './admin-artist.controller';
 import { AdminBannerController } from './admin-banner.controller';
+import { AdminMigrationController } from './admin-migration.controller';
 import { AdminPlaylistController } from './admin-playlist.controller';
 import { AdminSettingController } from './admin-setting.controller';
 import { AdminSongController } from './admin-song.controller';
@@ -11,6 +12,7 @@ import { AdminUserController } from './admin-user.controller';
 import { AdminController } from './admin.controller';
 import { AdminResourceService } from './admin-resource.service';
 import { AdminService } from './admin.service';
+import { MigrationService } from './migration.service';
 import { OperationLogModule } from '../operation-log/operation-log.module';
 
 /**
@@ -32,7 +34,8 @@ import { OperationLogModule } from '../operation-log/operation-log.module';
     AdminUserController,
     AdminSettingController,
     AdminUploadController,
+    AdminMigrationController,
   ],
-  providers: [AdminService, AdminResourceService],
+  providers: [AdminService, AdminResourceService, MigrationService],
 })
 export class AdminModule {}
