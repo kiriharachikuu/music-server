@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { StorageConfigService } from '../upload/storage-config.service';
 import { PrismaService } from '../../prisma/prisma.service';
 
 /** 后台统计返回结构 */
@@ -19,7 +20,10 @@ export interface AdminStats {
 
 @Injectable()
 export class AdminService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly storageConfigService: StorageConfigService,
+  ) {}
 
   /** 后台总览统计 */
   async getStats(): Promise<AdminStats> {
@@ -136,6 +140,7 @@ export class AdminService {
         }),
       ),
     );
+    this.storageConfigService.refresh();
     return this.getSettings();
   }
 }

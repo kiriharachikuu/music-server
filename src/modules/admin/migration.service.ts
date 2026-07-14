@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
+import { StorageConfigService } from '../upload/storage-config.service';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { S3Client, PutObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
@@ -48,7 +48,7 @@ export class MigrationService {
   private cancelRequested = false;
 
   constructor(
-    private readonly config: ConfigService,
+    private readonly storageConfig: StorageConfigService,
     private readonly prisma: PrismaService,
   ) {}
 
@@ -124,14 +124,9 @@ export class MigrationService {
     return map[ext] || 'application/octet-stream';
   }
 
-  private createStorageClient(): any {
-    const driver = (this.config.get<string>('storage.driver') || 's3').toLowerCase();
-    const bucket = this.config.get<string>('storage.bucket') || '';
-    const region = this.config.get<string>('storage.region') || '';
-    const secretId = this.config.get<string>('storage.secretId') || '';
-    const secretKey = this.config.get<string>('storage.secretKey') || '';
-    const sessionToken = this.config.get<string>('storage.sessionToken') || '';
-    const endpoint = this.config.get<string>('storage.endpoint') || '';
+  private async createStorageClient(): Promise<any> {
+    const cfg = await this.storageConfig.getConfig();
+    const { driver, bucket, region, secretId, secretKey, sessionToken, endpoint, publicDomain } = cfg;
 
     if (driver === 'cos') {
       const cos = new COS({
@@ -169,7 +164,6 @@ export class MigrationService {
         ...(sessionToken ? { sessionToken } : {}),
       },
     });
-    const publicDomain = this.config.get<string>('storage.publicDomain') || '';
     return {
       type: 's3',
       bucket,
@@ -200,16 +194,17 @@ export class MigrationService {
   }
 
   private async runMigration(): Promise<void> {
-    const driver = (this.config.get<string>('storage.driver') || 's3').toLowerCase();
+    const cfg = await this.storageConfig.getConfig();
+    const { driver } = cfg;
 
     try {
       if (driver === 'local') {
-        throw new Error('当前存储驱动为 local，请先在设置中切换到 s3 或 cos 并重启服务');
+        throw new Error('当前存储驱动为 local，请先在设置中切换到 s3 或 cos');
       }
 
       const localRoot = path.resolve(
         process.cwd(),
-        this.config.get<string>('storage.localStoragePath') || './uploads',
+        cfg.localStoragePath || './uploads',
       );
 
       this.log(`本地目录：${localRoot}`);
@@ -227,7 +222,7 @@ export class MigrationService {
         return;
       }
 
-      const storage = this.createStorageClient();
+      const storage = await this.createStorageClient();
       const urlPrefix = '/uploads';
 
       for (let i = 0; i < files.length; i++) {
