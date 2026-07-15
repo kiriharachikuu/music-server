@@ -130,10 +130,18 @@ export class AppVersionService {
 
     if (file) {
       const uploadResult = await this.storage.upload(file, 'apk');
-      downloadUrl = uploadResult.url;
-      fileSize = file.size;
-      md5 = crypto.createHash('md5').update(file.buffer).digest('hex');
-    } else if (!downloadUrl) {
+      if (!downloadUrl) {
+        downloadUrl = uploadResult.url;
+      }
+      if (!fileSize || fileSize === 0) {
+        fileSize = file.size;
+      }
+      if (!md5) {
+        md5 = crypto.createHash('md5').update(file.buffer).digest('hex');
+      }
+    }
+
+    if (!downloadUrl) {
       throw new BadRequestException('请上传APK文件或填写下载地址');
     }
 
