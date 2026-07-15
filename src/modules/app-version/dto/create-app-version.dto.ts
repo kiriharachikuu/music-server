@@ -1,6 +1,8 @@
 import { IsInt, IsString, IsBoolean, IsOptional, Min } from 'class-validator';
+import { Type, Transform } from 'class-transformer';
 
 export class CreateAppVersionDto {
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   versionCode: number;
@@ -16,9 +18,11 @@ export class CreateAppVersionDto {
   @IsString()
   content?: string;
 
+  @IsOptional()
   @IsString()
-  downloadUrl: string;
+  downloadUrl?: string;
 
+  @Type(() => Number)
   @IsInt()
   @Min(0)
   fileSize: number;
@@ -28,10 +32,12 @@ export class CreateAppVersionDto {
   md5?: string;
 
   @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
   @IsBoolean()
   forceUpdate?: boolean;
 
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(0)
   minVersionCode?: number;
