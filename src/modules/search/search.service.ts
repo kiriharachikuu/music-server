@@ -104,6 +104,10 @@ export class SearchService {
           isPublic: true,
           name: { contains: q },
         },
+        orderBy: [
+          { isSystem: 'desc' },
+          { playCount: 'desc' },
+        ],
         take: 20,
         include: {
           user: { select: { id: true, username: true, avatar: true } },

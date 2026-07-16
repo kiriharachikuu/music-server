@@ -10,7 +10,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 export class PlaylistService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** 公开歌单分页列表（isPublic=true） */
+  /** 公开歌单分页列表（isPublic=true），官方歌单（isSystem=true）永远优先展示 */
   async list(query: {
     page?: string;
     limit?: string;
@@ -23,7 +23,10 @@ export class PlaylistService {
         where,
         skip,
         take,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [
+          { isSystem: 'desc' },
+          { createdAt: 'desc' },
+        ],
         include: { user: { select: { id: true, username: true, avatar: true } } },
       }),
       this.prisma.playlist.count({ where }),

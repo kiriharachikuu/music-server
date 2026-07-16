@@ -24,7 +24,7 @@ export class StatsService {
    * - banners：首页轮播图（含关联歌曲，供点击播放）
    * - dailyRecommend：从最新 50 首歌曲中随机抽取 30 首
    * - newSongs：按 releaseDate 降序 10 首
-   * - featuredPlaylists：按 playCount 降序 6 个
+   * - featuredPlaylists：官方歌单（isSystem=true）优先，再按 playCount 降序 6 个
    */
   async getDiscover() {
     const [banners, dailyRecommendPool, newSongs, featuredPlaylists, hotArtists] =
@@ -51,7 +51,10 @@ export class StatsService {
         }),
         this.prisma.playlist.findMany({
           where: { isPublic: true, deletedAt: null },
-          orderBy: { playCount: 'desc' },
+          orderBy: [
+            { isSystem: 'desc' },
+            { playCount: 'desc' },
+          ],
           take: 6,
           include: {
             user: { select: { id: true, username: true, avatar: true } },
@@ -85,63 +88,55 @@ export class StatsService {
   }
 
   /**
-   * 排行榜：3 个榜单各 50 首
-   * - soar：近 30 天发行歌曲按维度降序（飙升）；若无近 30 天歌曲，回退到最新发行歌曲
-   * - new：按维度降序（新歌榜，by=play 时退化为 releaseDate 倒序）
-   * - hot：按维度降序（热歌榜）
+   * 排行榜：基于官方歌单（isSystem=true）的人工推荐
+   * 每个榜单对应一个标记为系统歌单的官方歌单：
+   * - soar（飙升榜）：匹配名称包含"飙升"的系统歌单
+   * - new（新歌榜）：匹配名称包含"新歌"的系统歌单
+   * - hot（热歌榜）：匹配名称包含"热歌"的系统歌单
    *
-   * 维度 by：
-   * - 'play'：按播放量 plays 降序（new 仍按 releaseDate 倒序，新歌榜语义）
-   * - 'favorite'：按收藏量 favoriteCount 降序（3 个榜单统一）
-   *
-   * 注意：soar 榜优先近 30 天 releaseDate 条件，无数据时回退到最新发行歌曲。
+   * 注意：已彻底停用基于播放量/收藏量的自动推送算法。
+   * 若未配置对应官方歌单，返回空数组。
+   * 歌曲顺序严格遵循歌单内歌曲的 sort 字段排序。
    */
-  async getRankings(by: 'play' | 'favorite' = 'play') {
-    const baseWhere = { deletedAt: null, status: 'PUBLISHED' as const };
-    const monthAgo = new Date(Date.now() - 30 * 24 * 3600 * 1000);
-    const include = { album: true };
+  async getRankings(_by: 'play' | 'favorite' = 'play') {
+    const rankingKeywords: { key: 'soar' | 'new' | 'hot'; keyword: string }[] = [
+      { key: 'soar', keyword: '飙升' },
+      { key: 'new', keyword: '新歌' },
+      { key: 'hot', keyword: '热歌' },
+    ];
 
-    const isFavorite = by === 'favorite';
-    const favoriteOrderBy = { favoriteCount: 'desc' } as const;
-    const newOrderBy = isFavorite
-      ? favoriteOrderBy
-      : ({ releaseDate: 'desc' } as const);
-    const playOrderBy = { plays: 'desc' } as const;
-    const hotOrderBy = isFavorite ? favoriteOrderBy : playOrderBy;
-    const soarOrderBy = isFavorite ? favoriteOrderBy : playOrderBy;
+    const systemPlaylists = await this.prisma.playlist.findMany({
+      where: {
+        isSystem: true,
+        deletedAt: null,
+        isPublic: true,
+      },
+      include: {
+        playlistSongs: {
+          where: { song: { deletedAt: null, status: 'PUBLISHED' } },
+          orderBy: { sort: 'asc' },
+          take: 50,
+          include: {
+            song: { include: { album: true } },
+          },
+        },
+      },
+    });
 
-    const [soar, newSongs, hot] = await Promise.all([
-      this.prisma.song.findMany({
-        where: { ...baseWhere, releaseDate: { gte: monthAgo } },
-        orderBy: soarOrderBy,
-        take: 50,
-        include,
-      }),
-      this.prisma.song.findMany({
-        where: baseWhere,
-        orderBy: newOrderBy,
-        take: 50,
-        include,
-      }),
-      this.prisma.song.findMany({
-        where: baseWhere,
-        orderBy: hotOrderBy,
-        take: 50,
-        include,
-      }),
-    ]);
+    const result: { soar: any[]; new: any[]; hot: any[] } = {
+      soar: [],
+      new: [],
+      hot: [],
+    };
 
-    if (soar.length === 0) {
-      const fallbackSoar = await this.prisma.song.findMany({
-        where: baseWhere,
-        orderBy: [{ releaseDate: 'desc' }, soarOrderBy],
-        take: 50,
-        include,
-      });
-      return { soar: fallbackSoar, new: newSongs, hot };
+    for (const { key, keyword } of rankingKeywords) {
+      const matched = systemPlaylists.find((p) => p.name.includes(keyword));
+      if (matched) {
+        result[key] = matched.playlistSongs.map((ps) => ps.song);
+      }
     }
 
-    return { soar, new: newSongs, hot };
+    return result;
   }
 
   /** 站点公开设置项 */
