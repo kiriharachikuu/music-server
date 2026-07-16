@@ -75,7 +75,12 @@ export class MigrationService {
     };
     this.cancelRequested = false;
 
-    void this.runMigration();
+    void this.runMigration().catch((err: unknown) => {
+      this.progress.status = 'failed';
+      this.progress.error = err instanceof Error ? err.message : String(err);
+      this.progress.finishedAt = new Date().toISOString();
+      this.log(`迁移异常：${err instanceof Error ? err.message : String(err)}`);
+    });
     return this.progress;
   }
 

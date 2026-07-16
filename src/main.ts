@@ -12,7 +12,25 @@ import { AppModule } from './app.module';
 
 const DEFAULT_JWT_SECRET = 'xt-music-dev-secret';
 
+function registerProcessErrorHandlers() {
+  const logger = new Logger('ProcessError');
+
+  process.on('uncaughtException', (err: Error) => {
+    logger.error(`未捕获的异常: ${err.message}`, err.stack);
+  });
+
+  process.on('unhandledRejection', (reason: unknown, promise: Promise<unknown>) => {
+    logger.error(
+      `未处理的 Promise rejection: ${reason instanceof Error ? reason.message : String(reason)}`,
+      reason instanceof Error ? reason.stack : undefined,
+    );
+    void promise.catch(() => {});
+  });
+}
+
 async function bootstrap() {
+  registerProcessErrorHandlers();
+
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bufferLogs: true,
   });
