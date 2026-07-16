@@ -14,9 +14,9 @@ export class CreateAlbumDto {
   @IsNotEmpty({ message: '专辑名称不能为空' })
   name: string;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty({ message: '歌手不能为空' })
-  artist: string;
+  artist?: string;
 
   @IsOptional()
   @IsString()

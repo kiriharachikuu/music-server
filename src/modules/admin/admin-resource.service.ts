@@ -264,7 +264,7 @@ export class AdminResourceService {
   async createAlbum(dto: CreateAlbumDto) {
     const { artistIds, ...rest } = dto;
     return this.prisma.$transaction(async (tx) => {
-      let artistDisplay = rest.artist;
+      let artistDisplay = rest.artist ?? '';
       if (artistIds?.length) {
         const artists = await tx.artist.findMany({
           where: { id: { in: artistIds } },
