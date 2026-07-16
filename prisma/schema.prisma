@@ -45,7 +45,7 @@ model User {
   /** 累计登录次数 */
   loginCount   Int     @default(0)
   /** 密码最近更新时间，用于校验 JWT 是否在密码修改前签发（旧 token 自动失效） */
-  passwordUpdatedAt DateTime? @default(now())
+  passwordUpdatedAt DateTime?
 
   playlists       Playlist[]
   favorites       Favorite[]

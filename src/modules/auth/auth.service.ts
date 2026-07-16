@@ -34,11 +34,13 @@ export class AuthService {
       throw new ConflictException('用户名或邮箱已被注册');
     }
     const passwordHash = await bcrypt.hash(dto.password, 10);
+    const now = new Date();
     const user = await this.prisma.user.create({
       data: {
         username: dto.username,
         email: dto.email,
         password: passwordHash,
+        passwordUpdatedAt: now,
       },
     });
     return { token: this.signToken(user.id, user.role), user: this.sanitize(user) };
