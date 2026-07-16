@@ -37,6 +37,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (!user || user.deletedAt) {
       throw new UnauthorizedException('用户不存在或已被禁用');
     }
+    if (user.passwordUpdatedAt && payload.iat) {
+      const tokenIssuedAt = new Date(payload.iat * 1000);
+      if (tokenIssuedAt < user.passwordUpdatedAt) {
+        throw new UnauthorizedException('密码已修改，请重新登录');
+      }
+    }
     return user;
   }
 }

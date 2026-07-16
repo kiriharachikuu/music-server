@@ -12,10 +12,13 @@ import {
   Post,
   Put,
   Query,
+  Req,
   UploadedFile,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
+import type { Request } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -23,6 +26,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { STORAGE_SERVICE } from '../upload/storage.interface';
 import type { StorageService } from '../upload/storage.interface';
 import { AddSongsToPlaylistDto } from './dto/add-songs.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { CreatePlaylistDto } from './dto/create-playlist.dto';
 import { FavoriteDto } from './dto/favorite.dto';
 import { RecordHistoryDto } from './dto/history.dto';
@@ -60,6 +64,26 @@ export class UserController {
     @Body() dto: UpdateProfileDto,
   ) {
     return this.userService.updateProfile(userId, dto);
+  }
+
+  /**
+   * POST /api/user/password 修改密码
+   * 需 JWT 鉴权，校验当前密码，新密码 bcrypt 加密后落库，
+   * 更新 passwordUpdatedAt 使旧 JWT 失效并签发新 token。
+   * 限流：60 秒最多 3 次（防暴力破解当前密码）
+   */
+  @Post('password')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
+  changePassword(
+    @CurrentUser('id') userId: string,
+    @Body() dto: ChangePasswordDto,
+    @Req() request: Request,
+  ) {
+    return this.userService.changePassword(userId, {
+      ...dto,
+      ip: request.ip ?? null,
+    });
   }
 
   /** POST /api/user/upload/avatar 上传用户头像（multipart, 字段名 file） */

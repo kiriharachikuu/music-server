@@ -1,20 +1,29 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   buildPaginatedResult,
   PaginatedResult,
   parsePagination,
 } from '../../common/utils/pagination.util';
+import { OperationLogService } from '../operation-log/operation-log.service';
 import { CreatePlaylistDto } from './dto/create-playlist.dto';
 import { UpdatePlaylistDto } from './dto/update-playlist.dto';
 
 @Injectable()
 export class UserService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly jwtService: JwtService,
+    private readonly operationLogService: OperationLogService,
+  ) {}
 
   /** 获取当前用户资料（不含密码） */
   async getProfile(userId: string) {
@@ -54,6 +63,65 @@ export class UserService {
     });
     const { password: _password, ...rest } = updated;
     return rest;
+  }
+
+  /**
+   * 修改用户密码
+   * - 校验当前密码
+   * - 校验两次输入的新密码一致
+   * - bcrypt 加密新密码后落库
+   * - 更新 passwordUpdatedAt 使旧 JWT 失效
+   * - 签发新 JWT
+   * - 记录操作日志
+   */
+  async changePassword(
+    userId: string,
+    data: { currentPassword: string; newPassword: string; confirmPassword: string; ip?: string | null },
+  ): Promise<{ token: string }> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+    if (!user || user.deletedAt) {
+      throw new NotFoundException('用户不存在');
+    }
+
+    if (data.newPassword !== data.confirmPassword) {
+      throw new BadRequestException('两次输入的新密码不一致');
+    }
+
+    if (data.newPassword === data.currentPassword) {
+      throw new BadRequestException('新密码不能与当前密码相同');
+    }
+
+    const currentPasswordOk = await bcrypt.compare(data.currentPassword, user.password);
+    if (!currentPasswordOk) {
+      throw new UnauthorizedException('当前密码错误');
+    }
+
+    const passwordHash = await bcrypt.hash(data.newPassword, 10);
+    const now = new Date();
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        password: passwordHash,
+        passwordUpdatedAt: now,
+      },
+    });
+
+    const token = this.jwtService.sign({ sub: userId, userId, role: user.role });
+
+    void this.operationLogService.createLog({
+      userId,
+      username: user.username,
+      action: 'UPDATE',
+      resource: 'user',
+      resourceId: userId,
+      detail: '修改密码',
+      ip: data.ip ?? null,
+    }).catch(() => { /* fire-and-forget */ });
+
+    return { token };
   }
 
   /** 收藏列表（分页，含歌曲详情，过滤已删歌曲避免 ghost song） */
