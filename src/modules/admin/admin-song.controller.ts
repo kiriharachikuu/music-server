@@ -67,4 +67,14 @@ export class AdminSongController {
   deleteLyric(@Param('id') id: string) {
     return this.resource.deleteLyricContent(id);
   }
+
+  @Post('batch/delete')
+  batchDelete(@Body() dto: { ids: string[] }) {
+    return this.resource.batchDeleteSongs(dto.ids);
+  }
+
+  @Post('batch/status')
+  batchUpdateStatus(@Body() dto: { ids: string[]; status: 'PUBLISHED' | 'DRAFT' }) {
+    return this.resource.batchUpdateSongStatus(dto.ids, dto.status);
+  }
 }

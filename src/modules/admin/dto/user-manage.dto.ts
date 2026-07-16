@@ -1,14 +1,44 @@
-import { IsBoolean, IsEnum } from 'class-validator';
+import { IsBoolean, IsEnum, IsArray, IsString, IsEmail, IsOptional, ArrayNotEmpty } from 'class-validator';
 import { Role } from '@prisma/client';
 
-/** 管理后台 - 设置用户角色 DTO */
 export class UpdateUserRoleDto {
   @IsEnum(Role)
   role: Role;
 }
 
-/** 管理后台 - 启用/禁用用户 DTO */
 export class UpdateUserStatusDto {
   @IsBoolean()
   disabled: boolean;
+}
+
+export class UpdateUserDto {
+  @IsOptional()
+  @IsString()
+  username?: string;
+
+  @IsOptional()
+  @IsEmail()
+  email?: string;
+
+  @IsOptional()
+  @IsString()
+  avatar?: string;
+
+  @IsOptional()
+  @IsEnum(Role)
+  role?: Role;
+}
+
+export class BatchUserIdsDto {
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsString({ each: true })
+  ids: string[];
+}
+
+export class BatchSongIdsDto {
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsString({ each: true })
+  ids: string[];
 }

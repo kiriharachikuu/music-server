@@ -518,10 +518,12 @@ export class AdminResourceService {
     page?: string;
     limit?: string;
     pageSize?: string;
+    includeDisabled?: string | boolean;
   }): Promise<PaginatedResult<unknown>> {
     const { page, limit, skip, take } = parsePagination(query);
+    const includeDisabled = query.includeDisabled === true || query.includeDisabled === 'true';
     const where = {
-      deletedAt: null,
+      ...(includeDisabled ? {} : { deletedAt: null }),
       ...buildKeywordWhere(query.keyword, ['username', 'email']),
     };
     const [list, total] = await this.prisma.$transaction([
@@ -750,6 +752,50 @@ export class AdminResourceService {
   private async assertPlaylistExists(id: string) {
     const playlist = await this.prisma.playlist.findFirst({ where: { id } });
     if (!playlist) throw new NotFoundException('歌单不存在');
+  }
+
+  async updateUser(id: string, data: { username?: string; email?: string; avatar?: string; role?: Role }) {
+    await this.assertUserExists(id);
+    return this.prisma.user.update({
+      where: { id },
+      data,
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        avatar: true,
+        role: true,
+        updatedAt: true,
+      },
+    });
+  }
+
+  async batchUpdateUserStatus(ids: string[], disabled: boolean) {
+    return this.prisma.user.updateMany({
+      where: { id: { in: ids } },
+      data: { deletedAt: disabled ? new Date() : null },
+    });
+  }
+
+  async batchUpdateUserRole(ids: string[], role: Role) {
+    return this.prisma.user.updateMany({
+      where: { id: { in: ids } },
+      data: { role },
+    });
+  }
+
+  async batchDeleteSongs(ids: string[]) {
+    return this.prisma.song.updateMany({
+      where: { id: { in: ids } },
+      data: { deletedAt: new Date() },
+    });
+  }
+
+  async batchUpdateSongStatus(ids: string[], status: 'PUBLISHED' | 'DRAFT') {
+    return this.prisma.song.updateMany({
+      where: { id: { in: ids } },
+      data: { status },
+    });
   }
 
   private async assertBannerExists(id: string) {
