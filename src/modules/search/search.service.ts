@@ -128,24 +128,53 @@ export class SearchService {
       albumName: song.album?.name,
     })) as unknown as SongWithAlbum[];
 
-    const artists = dbArtists.length > 0
-      ? dbArtists.map((a) => ({
-          id: a.id,
-          name: a.name,
-          cover: a.avatar,
-          avatar: a.avatar,
-          songCount: 0,
+    let artists: Array<{
+      id?: string;
+      name: string;
+      songCount: number;
+      cover: string | null;
+      avatar: string | null;
+    }>;
+
+    if (dbArtists.length > 0) {
+      const artistIds = dbArtists.map((a) => a.id);
+      const songCountRows = await this.prisma.songArtist.groupBy({
+        by: ['artistId'],
+        where: {
+          artistId: { in: artistIds },
+          song: {
+            deletedAt: null,
+            status: 'PUBLISHED',
+          },
+        },
+        _count: { artistId: true },
+      });
+      const countMap = new Map(
+        songCountRows.map((r) => [r.artistId, r._count.artistId]),
+      );
+      artists = dbArtists.map((a) => ({
+        id: a.id,
+        name: a.name,
+        cover: a.avatar,
+        avatar: a.avatar,
+        songCount: countMap.get(a.id) ?? 0,
+      }));
+    } else {
+      const map = new Map<string, number>();
+      for (const song of songs) {
+        const count = map.get(song.artist) ?? 0;
+        map.set(song.artist, count + 1);
+      }
+      artists = Array.from(map.entries())
+        .map(([name, songCount]) => ({
+          id: undefined,
+          name,
+          songCount,
+          cover: null as string | null,
+          avatar: null as string | null,
         }))
-      : (() => {
-          const map = new Map<string, number>();
-          for (const song of songs) {
-            const count = map.get(song.artist) ?? 0;
-            map.set(song.artist, count + 1);
-          }
-          return Array.from(map.entries())
-            .map(([name, songCount]) => ({ id: undefined, name, songCount, cover: null as string | null, avatar: null as string | null }))
-            .slice(0, 20);
-        })();
+        .slice(0, 20);
+    }
 
     return {
       songs: buildPaginatedResult(
