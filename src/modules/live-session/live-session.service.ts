@@ -78,11 +78,8 @@ export class LiveSessionService {
       trackIndex: clip.trackIndex,
     }));
 
-    const { clips: _originalClips, ...sessionWithoutClips } = session as any;
-    const result = { ...sessionWithoutClips, songCount: actualCount, clips: mappedClips };
-    console.log('[findOne] first clip trackType:', (result as any).clips[0]?.trackType);
-    console.log('[findOne] first clip keys:', Object.keys((result as any).clips[0] || {}));
-    return result;
+    const { clips: _originalClips, ...sessionWithoutClips } = session as Record<string, unknown>;
+    return { ...sessionWithoutClips, songCount: actualCount, clips: mappedClips };
   }
 
   // ============ 用户收藏 ============
