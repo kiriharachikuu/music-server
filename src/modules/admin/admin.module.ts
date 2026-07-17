@@ -14,6 +14,9 @@ import { AdminResourceService } from './admin-resource.service';
 import { AdminService } from './admin.service';
 import { MigrationService } from './migration.service';
 import { OperationLogModule } from '../operation-log/operation-log.module';
+import { AdminLiveSessionController } from './admin-live-session.controller';
+import { AdminLiveClipController } from './admin-live-clip.controller';
+import { LiveSessionModule } from '../live-session/live-session.module';
 
 /**
  * 后台管理模块
@@ -22,7 +25,7 @@ import { OperationLogModule } from '../operation-log/operation-log.module';
  * OperationLogModule 提供 OperationLogService，便于后续在管理服务中按需注入
  */
 @Module({
-  imports: [OperationLogModule],
+  imports: [OperationLogModule, LiveSessionModule],
   controllers: [
     AdminController,
     AdminSongController,
@@ -35,6 +38,8 @@ import { OperationLogModule } from '../operation-log/operation-log.module';
     AdminSettingController,
     AdminUploadController,
     AdminMigrationController,
+    AdminLiveSessionController,
+    AdminLiveClipController,
   ],
   providers: [AdminService, AdminResourceService, MigrationService],
 })

@@ -54,6 +54,7 @@ model User {
   playHistories   PlayHistory[]
   downloadRecords DownloadRecord[]
   operationLogs   OperationLog[]
+  sessionFavorites LiveSessionFavorite[]
 
   @@index([deletedAt])
 }
@@ -386,4 +387,69 @@ model SearchLog {
   @@index([keyword])
   @@index([createdAt])
   @@index([ip, createdAt])
+}
+
+// ============ 直播歌切功能 ============
+
+// 直播场次合集表
+model LiveSession {
+  id            String     @id @default(cuid())
+  title         String
+  artist        String
+  cover         String?
+  description   String?
+  liveTime      DateTime
+  sessionNumber Int?
+  songCount     Int        @default(0)
+  status        SongStatus @default(DRAFT)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  deletedAt     DateTime?
+
+  clips           LiveClip[]
+  sessionFavorites LiveSessionFavorite[]
+
+  @@index([liveTime])
+  @@index([status])
+  @@index([deletedAt])
+  @@index([title])
+  @@index([artist])
+}
+
+// 直播歌切表（每首歌在一次直播中的单独表演记录）
+model LiveClip {
+  id           String     @id @default(cuid())
+  title        String
+  artist       String
+  sessionId    String
+  trackIndex   Int
+  duration     Int
+  fileUrl      String
+  coverUrl     String?
+  lyricContent String?
+  status       SongStatus @default(DRAFT)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  session LiveSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([sessionId, trackIndex])
+  @@index([title])
+  @@index([artist])
+  @@index([status])
+}
+
+// 直播场次收藏表
+model LiveSessionFavorite {
+  id        String   @id @default(cuid())
+  userId    String
+  sessionId String
+  createdAt DateTime @default(now())
+
+  user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  session LiveSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, sessionId])
+  @@index([userId])
 }

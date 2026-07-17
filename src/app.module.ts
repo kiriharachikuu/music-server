@@ -27,6 +27,7 @@ import { StatsModule } from './modules/stats/stats.module';
 import { AppVersionModule } from './modules/app-version/app-version.module';
 import { ArtistModule } from './modules/artist/artist.module';
 import { OperationLogModule } from './modules/operation-log/operation-log.module';
+import { LiveSessionModule } from './modules/live-session/live-session.module';
 
 @Module({
   imports: [
@@ -52,6 +53,7 @@ import { OperationLogModule } from './modules/operation-log/operation-log.module
     AppVersionModule,
     ArtistModule,
     OperationLogModule,
+    LiveSessionModule,
   ],
   controllers: [AppController],
   providers: [

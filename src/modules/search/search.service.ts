@@ -186,6 +186,99 @@ export class SearchService {
       albums,
       playlists,
       artists,
+      liveClips: buildPaginatedResult([], 0, 1, 20),
+      liveSessions: [],
+    };
+  }
+
+  /**
+   * 带分类的搜索：支持按 category 筛选特定类型结果
+   * category: 'live_clips' | 'live_sessions'
+   */
+  async searchByCategory(query: {
+    q?: string;
+    category?: string;
+    page?: string;
+    limit?: string;
+    pageSize?: string;
+  }) {
+    const q = (query.q ?? '').trim();
+    const pagination = parsePagination(query);
+
+    if (!q) {
+      return {
+        liveClips: buildPaginatedResult([], 0, 1, 20),
+        liveSessions: buildPaginatedResult([], 0, 1, 20),
+      };
+    }
+
+    if (query.category === 'live_clips') {
+      const where: any = {
+        status: 'PUBLISHED',
+        OR: [
+          { title: { contains: q } },
+          { artist: { contains: q } },
+        ],
+      };
+      const [list, total] = await this.prisma.$transaction([
+        this.prisma.liveClip.findMany({
+          where,
+          orderBy: [{ sessionId: 'asc' }, { trackIndex: 'asc' }],
+          include: {
+            session: { select: { id: true, title: true, liveTime: true } },
+          },
+          skip: pagination.skip,
+          take: pagination.take,
+        }),
+        this.prisma.liveClip.count({ where }),
+      ]);
+      // 转换为前端 LiveClipTrack 格式：扁平化 session 字段 + 添加 trackType
+      const mapped = list.map((clip) => ({
+        id: clip.id,
+        title: clip.title,
+        artist: clip.artist,
+        cover: clip.coverUrl,
+        url: clip.fileUrl,
+        duration: clip.duration,
+        trackType: 'live_clip' as const,
+        sessionId: clip.sessionId,
+        sessionName: clip.session?.title ?? '',
+        liveTime: clip.session?.liveTime?.toISOString() ?? '',
+        trackIndex: clip.trackIndex,
+      }));
+      return {
+        liveClips: buildPaginatedResult(mapped, total, pagination.page, pagination.limit),
+        liveSessions: buildPaginatedResult([], 0, 1, 20),
+      };
+    }
+
+    if (query.category === 'live_sessions') {
+      const where: any = {
+        status: 'PUBLISHED',
+        deletedAt: null,
+        OR: [
+          { title: { contains: q } },
+          { artist: { contains: q } },
+        ],
+      };
+      const [list, total] = await this.prisma.$transaction([
+        this.prisma.liveSession.findMany({
+          where,
+          orderBy: { liveTime: 'desc' },
+          skip: pagination.skip,
+          take: pagination.take,
+        }),
+        this.prisma.liveSession.count({ where }),
+      ]);
+      return {
+        liveClips: buildPaginatedResult([], 0, 1, 20),
+        liveSessions: buildPaginatedResult(list, total, pagination.page, pagination.limit),
+      };
+    }
+
+    return {
+      liveClips: buildPaginatedResult([], 0, 1, 20),
+      liveSessions: buildPaginatedResult([], 0, 1, 20),
     };
   }
 

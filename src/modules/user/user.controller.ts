@@ -33,6 +33,7 @@ import { RecordHistoryDto } from './dto/history.dto';
 import { UpdatePlaylistDto } from './dto/update-playlist.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UserService } from './user.service';
+import { LiveSessionService } from '../live-session/live-session.service';
 
 const IMAGE_MAX_SIZE = parseInt(process.env.UPLOAD_MAX_SIZE_IMAGE_MB || '10', 10) * 1024 * 1024;
 const IMAGE_ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
@@ -47,6 +48,7 @@ const IMAGE_ALLOWED_EXT = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp']);
 export class UserController {
   constructor(
     private readonly userService: UserService,
+    private readonly liveSessionService: LiveSessionService,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
 
@@ -268,6 +270,46 @@ export class UserController {
     return this.userService
       .isPlaylistFavorited(userId, playlistId)
       .then((favorited) => ({ favorited }));
+  }
+
+  // ============ 直播场次收藏 ============
+
+  /** POST /api/user/live-sessions/:id/favorite 切换场次收藏 */
+  @Post('live-sessions/:id/favorite')
+  @HttpCode(HttpStatus.OK)
+  toggleLiveSessionFavorite(
+    @CurrentUser('id') userId: string,
+    @Param('id') sessionId: string,
+  ) {
+    return this.liveSessionService.toggleFavorite(userId, sessionId);
+  }
+
+  /** GET /api/user/live-sessions/:id/favorite 检查是否已收藏场次 */
+  @Get('live-sessions/:id/favorite')
+  checkLiveSessionFavorite(
+    @CurrentUser('id') userId: string,
+    @Param('id') sessionId: string,
+  ) {
+    return this.liveSessionService
+      .isFavorited(userId, sessionId)
+      .then((favorited) => ({ favorited }));
+  }
+
+  /** GET /api/user/live-sessions/favorites 已收藏的场次列表 */
+  @Get('live-sessions/favorites')
+  getFavoriteLiveSessions(@CurrentUser('id') userId: string) {
+    return this.liveSessionService.getFavorites(userId);
+  }
+
+  /** DELETE /api/user/live-sessions/:id/favorite 取消收藏场次 */
+  @Delete('live-sessions/:id/favorite')
+  @HttpCode(HttpStatus.OK)
+  async removeLiveSessionFavorite(
+    @CurrentUser('id') userId: string,
+    @Param('id') sessionId: string,
+  ) {
+    await this.liveSessionService.unfavorite(userId, sessionId);
+    return { favorited: false };
   }
 
   /** GET /api/user/history 播放历史 */

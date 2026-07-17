@@ -21,10 +21,20 @@ export class SearchController {
     @Query('tag') tag?: string,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
+    @Query('category') category?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('pageSize') pageSize?: string,
   ) {
+    if (category === 'live_clips' || category === 'live_sessions') {
+      return this.searchService.searchByCategory({
+        q,
+        category,
+        page,
+        limit,
+        pageSize,
+      });
+    }
     return this.searchService.search({
       q,
       sort,
