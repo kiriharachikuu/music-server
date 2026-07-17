@@ -312,6 +312,46 @@ export class UserController {
     return { favorited: false };
   }
 
+  // ============ 歌切收藏 ============
+
+  /** POST /api/user/live-clips/:id/favorite 切换歌切收藏 */
+  @Post('live-clips/:id/favorite')
+  @HttpCode(HttpStatus.OK)
+  toggleLiveClipFavorite(
+    @CurrentUser('id') userId: string,
+    @Param('id') clipId: string,
+  ) {
+    return this.liveSessionService.toggleClipFavorite(userId, clipId);
+  }
+
+  /** GET /api/user/live-clips/:id/favorite 检查是否已收藏歌切 */
+  @Get('live-clips/:id/favorite')
+  checkLiveClipFavorite(
+    @CurrentUser('id') userId: string,
+    @Param('id') clipId: string,
+  ) {
+    return this.liveSessionService
+      .isClipFavorited(userId, clipId)
+      .then((favorited) => ({ favorited }));
+  }
+
+  /** GET /api/user/live-clips/favorites 已收藏的歌切ID列表 */
+  @Get('live-clips/favorites')
+  getFavoriteLiveClipIds(@CurrentUser('id') userId: string) {
+    return this.liveSessionService.getFavoriteClipIds(userId);
+  }
+
+  /** DELETE /api/user/live-clips/:id/favorite 取消收藏歌切 */
+  @Delete('live-clips/:id/favorite')
+  @HttpCode(HttpStatus.OK)
+  async removeLiveClipFavorite(
+    @CurrentUser('id') userId: string,
+    @Param('id') clipId: string,
+  ) {
+    await this.liveSessionService.unfavoriteClip(userId, clipId);
+    return { favorited: false };
+  }
+
   /** GET /api/user/history 播放历史 */
   @Get('history')
   getHistory(

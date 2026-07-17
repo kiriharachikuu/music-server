@@ -56,6 +56,7 @@ model User {
   downloadRecords DownloadRecord[]
   operationLogs   OperationLog[]
   sessionFavorites LiveSessionFavorite[]
+  clipFavorites   LiveClipFavorite[]
 
   @@index([deletedAt])
 }
@@ -432,7 +433,8 @@ model LiveClip {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
-  session LiveSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  session   LiveSession        @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  favorites LiveClipFavorite[]
 
   @@index([sessionId])
   @@index([sessionId, trackIndex])
@@ -452,5 +454,19 @@ model LiveSessionFavorite {
   session LiveSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@unique([userId, sessionId])
+  @@index([userId])
+}
+
+// 直播歌切收藏表
+model LiveClipFavorite {
+  id        String   @id @default(cuid())
+  userId    String
+  clipId    String
+  createdAt DateTime @default(now())
+
+  user User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clip LiveClip  @relation(fields: [clipId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, clipId])
   @@index([userId])
 }

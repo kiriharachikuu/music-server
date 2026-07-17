@@ -145,6 +145,57 @@ export class LiveSessionService {
       }));
   }
 
+  // ============ 歌切收藏 ============
+
+  /** 切换歌切收藏状态 */
+  async toggleClipFavorite(
+    userId: string,
+    clipId: string,
+  ): Promise<{ favorited: boolean }> {
+    const clip = await this.prisma.liveClip.findFirst({
+      where: { id: clipId },
+    });
+    if (!clip) throw new NotFoundException('歌切不存在');
+
+    const existing = await this.prisma.liveClipFavorite.findUnique({
+      where: { userId_clipId: { userId, clipId } },
+    });
+    if (existing) {
+      await this.prisma.liveClipFavorite.delete({
+        where: { id: existing.id },
+      });
+      return { favorited: false };
+    }
+    await this.prisma.liveClipFavorite.create({
+      data: { userId, clipId },
+    });
+    return { favorited: true };
+  }
+
+  /** 检查用户是否已收藏某歌切 */
+  async isClipFavorited(userId: string, clipId: string): Promise<boolean> {
+    const fav = await this.prisma.liveClipFavorite.findUnique({
+      where: { userId_clipId: { userId, clipId } },
+    });
+    return !!fav;
+  }
+
+  /** 显式取消歌切收藏 */
+  async unfavoriteClip(userId: string, clipId: string): Promise<void> {
+    await this.prisma.liveClipFavorite.deleteMany({
+      where: { userId, clipId },
+    });
+  }
+
+  /** 获取用户已收藏的歌切ID列表 */
+  async getFavoriteClipIds(userId: string): Promise<string[]> {
+    const favorites = await this.prisma.liveClipFavorite.findMany({
+      where: { userId },
+      select: { clipId: true },
+    });
+    return favorites.map((f) => f.clipId);
+  }
+
   // ============ Admin ============
 
   /** Admin：分页搜索 + 状态筛选 */
