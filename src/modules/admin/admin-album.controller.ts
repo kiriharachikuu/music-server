@@ -18,7 +18,7 @@ import { CreateAlbumDto, UpdateAlbumDto } from './dto/album.dto';
 /** 后台专辑管理 路由前缀 /api/admin/albums */
 @Controller('admin/albums')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('ADMIN')
+@Roles('ADMIN', 'EDITOR')
 export class AdminAlbumController {
   constructor(private readonly resource: AdminResourceService) {}
 

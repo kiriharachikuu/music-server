@@ -23,11 +23,10 @@ import {
 /**
  * Admin 直播歌切管理
  * 路由前缀 /api/admin/live-clips
- * 全部需要 ADMIN 角色
  */
 @Controller('admin/live-clips')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('ADMIN')
+@Roles('ADMIN', 'EDITOR')
 export class AdminLiveClipController {
   constructor(private readonly liveSessionService: LiveSessionService) {}
 

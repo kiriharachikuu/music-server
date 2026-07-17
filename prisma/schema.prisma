@@ -15,6 +15,7 @@ datasource db {
 enum Role {
   USER
   ADMIN
+  EDITOR
 }
 
 // 歌曲发布状态

@@ -17,7 +17,7 @@ import { CreateArtistDto, UpdateArtistDto } from './dto/artist.dto';
 
 @Controller('admin/artists')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('ADMIN')
+@Roles('ADMIN', 'EDITOR')
 export class AdminArtistController {
   constructor(private readonly resource: AdminResourceService) {}
 

@@ -65,6 +65,15 @@ async function main() {
       avatar: null,
     },
   });
+  const editor = await prisma.user.create({
+    data: {
+      username: 'editor',
+      email: 'editor@xtmusic.com',
+      password: userPwd,
+      role: Role.EDITOR,
+      avatar: null,
+    },
+  });
 
   // 3. 标签
   const [tagPop, tagRock, tagElec] = await Promise.all([
@@ -286,10 +295,11 @@ async function main() {
   });
 
   console.log('种子数据写入完成：');
-  console.log(`  用户：admin / ${user1.username} / ${user2.username}`);
+  console.log(`  用户：admin / ${user1.username} / ${user2.username} / ${editor.username}`);
   console.log(`  专辑：${album1.name} / ${album2.name}`);
   console.log(`  歌曲：${songs.length} 首`);
   console.log(`  管理员账号：admin / admin123`);
+  console.log(`  编辑账号：editor / user123`);
 }
 
 main()

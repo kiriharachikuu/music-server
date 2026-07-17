@@ -23,7 +23,7 @@ import {
 /** 后台歌单管理 路由前缀 /api/admin/playlists */
 @Controller('admin/playlists')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('ADMIN')
+@Roles('ADMIN', 'EDITOR')
 export class AdminPlaylistController {
   constructor(private readonly resource: AdminResourceService) {}
 

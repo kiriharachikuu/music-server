@@ -18,7 +18,7 @@ import { CreateSongDto, UpdateSongDto } from './dto/song.dto';
 /** 后台歌曲管理 路由前缀 /api/admin/songs */
 @Controller('admin/songs')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('ADMIN')
+@Roles('ADMIN', 'EDITOR')
 export class AdminSongController {
   constructor(private readonly resource: AdminResourceService) {}
 

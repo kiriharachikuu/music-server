@@ -23,11 +23,10 @@ import {
 /**
  * Admin 直播场次管理
  * 路由前缀 /api/admin/live-sessions
- * 全部需要 ADMIN 角色
  */
 @Controller('admin/live-sessions')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('ADMIN')
+@Roles('ADMIN', 'EDITOR')
 export class AdminLiveSessionController {
   constructor(private readonly liveSessionService: LiveSessionService) {}
 
