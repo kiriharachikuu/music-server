@@ -29,8 +29,11 @@ async function main() {
   await prisma.playHistory.deleteMany();
   await prisma.downloadRecord.deleteMany();
   await prisma.songTag.deleteMany();
+  await prisma.songArtist.deleteMany();
+  await prisma.albumArtist.deleteMany();
   await prisma.song.deleteMany();
   await prisma.album.deleteMany();
+  await prisma.artist.deleteMany();
   await prisma.tag.deleteMany();
   await prisma.playlist.deleteMany();
   await prisma.banner.deleteMany();
@@ -100,6 +103,24 @@ async function main() {
         cover: 'https://picsum.photos/seed/album2/600/600',
         description: '复古合成器浪潮，点亮霓虹之夜。',
         releaseDate: new Date('2024-10-31'),
+      },
+    }),
+  ]);
+
+  // 4.5 歌手
+  const [artist1, artist2] = await Promise.all([
+    prisma.artist.create({
+      data: {
+        name: '星瞳',
+        avatar: album1.cover,
+        bio: '星瞳，虚拟偶像歌手，首张专辑《星海漫游》带你漫游浩瀚星海。',
+      },
+    }),
+    prisma.artist.create({
+      data: {
+        name: 'Synth Riders',
+        avatar: album2.cover,
+        bio: 'Synth Riders，复古合成器浪潮乐队，代表专辑《霓虹之夜》。',
       },
     }),
   ]);
@@ -224,6 +245,25 @@ async function main() {
   await prisma.album.update({ where: { id: album1.id }, data: { songCount: 4 } });
   await prisma.album.update({ where: { id: album2.id }, data: { songCount: 3 } });
 
+  // 5.5 歌手关联
+  const publishedSongs = songs.filter((s) => s.status === SongStatus.PUBLISHED);
+  const starTongSongs = publishedSongs.filter((s) => s.artist === '星瞳');
+  const synthSongs = publishedSongs.filter((s) => s.artist === 'Synth Riders');
+
+  await prisma.songArtist.createMany({
+    data: [
+      ...starTongSongs.map((s, i) => ({ songId: s.id, artistId: artist1.id, sort: i })),
+      ...synthSongs.map((s, i) => ({ songId: s.id, artistId: artist2.id, sort: i })),
+    ],
+  });
+
+  await prisma.albumArtist.createMany({
+    data: [
+      { albumId: album1.id, artistId: artist1.id, sort: 0 },
+      { albumId: album2.id, artistId: artist2.id, sort: 0 },
+    ],
+  });
+
   // 6. Banner
   await Promise.all([
     prisma.banner.create({
@@ -296,6 +336,7 @@ async function main() {
 
   console.log('种子数据写入完成：');
   console.log(`  用户：admin / ${user1.username} / ${user2.username} / ${editor.username}`);
+  console.log(`  歌手：${artist1.name} / ${artist2.name}`);
   console.log(`  专辑：${album1.name} / ${album2.name}`);
   console.log(`  歌曲：${songs.length} 首`);
   console.log(`  管理员账号：admin / admin123`);
