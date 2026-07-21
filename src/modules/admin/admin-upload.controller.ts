@@ -15,6 +15,7 @@ import { RolesGuard } from '../auth/roles.guard';
 import { AudioProcessService } from '../upload/audio-process.service';
 import { STORAGE_SERVICE } from '../upload/storage.interface';
 import type { StorageService } from '../upload/storage.interface';
+import { PrismaService } from '../../prisma/prisma.service';
 import { memoryStorage } from 'multer';
 
 const toMB = (mb: number) => mb * 1024 * 1024;
@@ -69,11 +70,12 @@ type AllowedCategory = keyof typeof UPLOAD_CONFIG;
 /** 后台文件上传 路由前缀 /api/admin/upload */
 @Controller('admin/upload')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('ADMIN')
+@Roles('ADMIN', 'EDITOR')
 export class AdminUploadController {
   constructor(
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
     private readonly audioProcess: AudioProcessService,
+    private readonly prisma: PrismaService,
   ) {}
 
   /** POST /api/admin/upload?type=image|audio|lyric (multipart, 字段名 file) */
@@ -143,6 +145,11 @@ export class AdminUploadController {
     }
 
     const result = await this.storage.upload(file, category);
+
+    // 记录上传，用于孤立文件清理
+    await this.prisma.uploadRecord.create({
+      data: { path: result.path, category },
+    });
 
     // 仅音频类型解析元数据与文件名信息，图片 / 歌词保持原响应
     if (category !== 'audio') {

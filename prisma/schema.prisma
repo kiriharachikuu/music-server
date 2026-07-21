@@ -474,3 +474,14 @@ model LiveClipFavorite {
   @@unique([userId, clipId])
   @@index([userId])
 }
+
+// 上传文件记录表（用于孤立文件清理）
+model UploadRecord {
+  id        String   @id @default(cuid())
+  path      String   // 存储引擎内部相对路径
+  category  String   // image / audio / lyric / apk / other
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([category])
+}

@@ -3,6 +3,7 @@ import { AudioProcessService } from './audio-process.service';
 import { DynamicStorageService } from './dynamic-storage.service';
 import { StorageConfigService } from './storage-config.service';
 import { STORAGE_SERVICE } from './storage.interface';
+import { FileCleanupService } from './file-cleanup.service';
 
 @Global()
 @Module({
@@ -13,6 +14,7 @@ import { STORAGE_SERVICE } from './storage.interface';
       useClass: DynamicStorageService,
     },
     AudioProcessService,
+    FileCleanupService,
   ],
   exports: [STORAGE_SERVICE, AudioProcessService, StorageConfigService],
 })

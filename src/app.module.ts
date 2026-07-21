@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { WinstonModule } from 'nest-winston';
 
@@ -37,6 +38,8 @@ import { LiveSessionModule } from './modules/live-session/live-session.module';
     WinstonModule.forRoot(winstonConfig),
     // 全局速率限制：60 秒内最多 100 次请求
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
+    // 定时任务模块（孤立文件清理等）
+    ScheduleModule.forRoot(),
     // Prisma 全局数据库模块
     PrismaModule,
     // 业务模块
