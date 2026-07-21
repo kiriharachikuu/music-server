@@ -147,18 +147,21 @@ model Playlist {
   @@index([name])
 }
 
-// 歌单-歌曲关联表
+// 歌单-歌曲关联表（支持歌曲和直播歌切）
 model PlaylistSong {
   id         String   @id @default(cuid())
   playlistId String
-  songId     String
+  songId     String?
+  clipId     String?
   sort       Int
   createdAt  DateTime @default(now())
 
-  playlist Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
-  song     Song     @relation(fields: [songId], references: [id], onDelete: Cascade)
+  playlist Playlist  @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+  song     Song?     @relation(fields: [songId], references: [id], onDelete: Cascade)
+  clip     LiveClip? @relation(fields: [clipId], references: [id], onDelete: Cascade)
 
   @@unique([playlistId, songId])
+  @@unique([playlistId, clipId])
   @@index([playlistId, sort])
 }
 
@@ -435,6 +438,7 @@ model LiveClip {
 
   session   LiveSession        @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   favorites LiveClipFavorite[]
+  playlistSongs PlaylistSong[]
 
   @@index([sessionId])
   @@index([sessionId, trackIndex])

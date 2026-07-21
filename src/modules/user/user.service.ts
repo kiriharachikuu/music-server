@@ -233,11 +233,12 @@ export class UserService {
     return { deleted: true };
   }
 
-  /** 批量添加歌曲到歌单（校验归属，自动续接 sort，跳过已存在） */
+  /** 批量添加歌曲/歌切到歌单（校验归属，自动续接 sort，跳过已存在） */
   async addSongsToPlaylist(
     userId: string,
     id: string,
     songIds: string[],
+    clipIds?: string[],
   ): Promise<{ added: number }> {
     const playlist = await this.assertPlaylistOwned(userId, id);
     // 取当前最大 sort
@@ -247,38 +248,57 @@ export class UserService {
     });
     let sort = last?.sort ?? 0;
 
-    // SQLite 不支持 createMany 的 skipDuplicates，先查询已存在的歌曲手动去重，
-    // 避免 (playlistId, songId) 唯一约束冲突抛 P2003
-    const existing = await this.prisma.playlistSong.findMany({
-      where: { playlistId: playlist.id, songId: { in: songIds } },
-      select: { songId: true },
-    });
-    const existingSet = new Set(existing.map((e) => e.songId));
-    const toAdd = songIds.filter((sid) => !existingSet.has(sid));
-    if (toAdd.length === 0) {
+    const data: { playlistId: string; songId?: string; clipId?: string; sort: number }[] = [];
+
+    // 歌曲去重
+    if (songIds.length > 0) {
+      const existing = await this.prisma.playlistSong.findMany({
+        where: { playlistId: playlist.id, songId: { in: songIds } },
+        select: { songId: true },
+      });
+      const existingSet = new Set(existing.map((e) => e.songId));
+      for (const songId of songIds) {
+        if (!existingSet.has(songId)) {
+          data.push({ playlistId: playlist.id, songId, sort: ++sort });
+        }
+      }
+    }
+
+    // 歌切去重
+    if (clipIds && clipIds.length > 0) {
+      const existingClips = await this.prisma.playlistSong.findMany({
+        where: { playlistId: playlist.id, clipId: { in: clipIds } },
+        select: { clipId: true },
+      });
+      const existingClipSet = new Set(existingClips.map((e) => e.clipId));
+      for (const clipId of clipIds) {
+        if (!existingClipSet.has(clipId)) {
+          data.push({ playlistId: playlist.id, clipId, sort: ++sort });
+        }
+      }
+    }
+
+    if (data.length === 0) {
       return { added: 0 };
     }
 
-    const data = toAdd.map((songId) => ({
-      playlistId: playlist.id,
-      songId,
-      sort: ++sort,
-    }));
-    const result = await this.prisma.playlistSong.createMany({
-      data,
-    });
+    const result = await this.prisma.playlistSong.createMany({ data });
     return { added: result.count };
   }
 
-  /** 从歌单中删除歌曲（校验归属） */
+  /** 从歌单中删除歌曲/歌切（校验归属） */
   async removeSongFromPlaylist(
     userId: string,
     id: string,
     songId: string,
   ): Promise<{ removed: true }> {
     const playlist = await this.assertPlaylistOwned(userId, id);
+    // songId 可能是歌曲 ID 也可能是歌切 ID，同时尝试两种删除
     await this.prisma.playlistSong.deleteMany({
-      where: { playlistId: playlist.id, songId },
+      where: {
+        playlistId: playlist.id,
+        OR: [{ songId }, { clipId: songId }],
+      },
     });
     return { removed: true };
   }

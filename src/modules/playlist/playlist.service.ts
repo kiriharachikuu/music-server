@@ -34,17 +34,23 @@ export class PlaylistService {
     return buildPaginatedResult(list, total, page, limit);
   }
 
-  /** 歌单详情 + 歌曲（按 sort 升序） */
+  /** 歌单详情 + 歌曲/歌切（按 sort 升序） */
   async getDetail(id: string) {
     const playlist = await this.prisma.playlist.findFirst({
       where: { id, deletedAt: null, isPublic: true },
       include: {
         user: { select: { id: true, username: true, avatar: true } },
         playlistSongs: {
-          where: { song: { deletedAt: null } },
+          where: {
+            OR: [
+              { song: { deletedAt: null } },
+              { clip: { status: 'PUBLISHED' } },
+            ],
+          },
           orderBy: { sort: 'asc' },
           include: {
             song: { include: { album: true } },
+            clip: { include: { session: true } },
           },
         },
       },
@@ -55,9 +61,9 @@ export class PlaylistService {
     return playlist;
   }
 
-  /** 歌单下的歌曲列表（扁平数组，按 sort 升序） */
+  /** 歌单下的歌曲/歌切列表（扁平数组，按 sort 升序） */
   async getSongs(id: string) {
     const playlist = await this.getDetail(id);
-    return playlist.playlistSongs.map((ps) => ps.song);
+    return playlist.playlistSongs.map((ps) => ps.song ?? ps.clip);
   }
 }

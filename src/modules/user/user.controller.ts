@@ -193,7 +193,7 @@ export class UserController {
     return this.storage.upload(file, 'playlists', playlistId);
   }
 
-  /** POST /api/user/playlists/:id/songs 批量添加歌曲 */
+  /** POST /api/user/playlists/:id/songs 批量添加歌曲/歌切 */
   @Post('playlists/:id/songs')
   @HttpCode(HttpStatus.OK)
   addSongsToPlaylist(
@@ -201,7 +201,12 @@ export class UserController {
     @Param('id') id: string,
     @Body() dto: AddSongsToPlaylistDto,
   ) {
-    return this.userService.addSongsToPlaylist(userId, id, dto.songIds);
+    return this.userService.addSongsToPlaylist(
+      userId,
+      id,
+      dto.songIds ?? [],
+      dto.clipIds,
+    );
   }
 
   /** DELETE /api/user/playlists/:id/songs/:songId 从歌单删除歌曲 */
