@@ -14,6 +14,7 @@ import {
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger(AllExceptionsFilter.name);
+  private readonly isProd = process.env.NODE_ENV === 'production';
 
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
@@ -49,11 +50,13 @@ export class AllExceptionsFilter implements ExceptionFilter {
             message = '记录不存在';
             break;
           default:
-            code = HttpStatus.BAD_REQUEST;
-            message = `数据库错误: ${err.code as string}`;
+            // 生产环境不暴露内部 Prisma 错误码，仅记日志
+            code = HttpStatus.INTERNAL_SERVER_ERROR;
+            message = this.isProd ? '服务器内部错误' : `数据库错误: ${err.code as string}`;
         }
       } else if (exception instanceof Error) {
-        message = exception.message || message;
+        // 生产环境不把内部异常 message 直接返回客户端，避免泄露堆栈/文件路径/SQL 等敏感信息
+        message = this.isProd ? '服务器内部错误' : exception.message || message;
       }
     }
 

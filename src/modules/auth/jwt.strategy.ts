@@ -26,7 +26,11 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: config.get<string>('jwt.secret') || 'xt-music-dev-secret',
+      // 密钥由 configuration.ts 统一提供（dev 回退默认值），此处不再二次回退，
+      // 避免配置缺失时静默使用已知默认密钥导致 token 可被伪造。
+      // 显式校验非空：生产环境由 main.ts 的 runSecurityChecks 拦截默认密钥，
+      // 此处再做空值断言以满足类型约束并作为防御性编程。
+      secretOrKey: config.get<string>('jwt.secret') as string,
     });
   }
 

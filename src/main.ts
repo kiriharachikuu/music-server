@@ -183,12 +183,14 @@ function runSecurityChecks(
   const logger = new Logger('SecurityCheck');
   const isProd = nodeEnv === 'production';
 
-  if (isProd && jwtSecret === DEFAULT_JWT_SECRET) {
+  if (isProd && (jwtSecret === DEFAULT_JWT_SECRET || !jwtSecret)) {
     logger.error('========================================');
-    logger.error('  严重安全警告：JWT 密钥使用了默认值！');
+    logger.error('  严重安全错误：JWT 密钥使用了默认值或未设置！');
     logger.error('  请立即在环境变量中设置 JWT_SECRET');
     logger.error('  为强随机字符串（至少32位）');
     logger.error('========================================');
+    // 生产环境强制终止启动，避免攻击者用已知默认密钥伪造任意 JWT
+    throw new Error('生产环境禁止使用默认或空的 JWT 密钥，请配置 JWT_SECRET 环境变量');
   } else if (!isProd && jwtSecret === DEFAULT_JWT_SECRET) {
     logger.warn('当前使用默认 JWT 密钥，仅用于开发环境');
   }

@@ -367,11 +367,16 @@ export class SearchService {
         data: { keyword, ip: ip ?? null },
       });
 
-      // 清理 30 天前的旧日志（轻量索引查询，保持表体量可控）
-      const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-      await this.prisma.searchLog.deleteMany({
-        where: { createdAt: { lt: thirtyDaysAgo } },
-      });
+      // 清理 30 天前的旧日志：按 1% 概率执行，避免每次搜索都触发 deleteMany 造成性能瓶颈
+      // 既能保持表体量可控，又不影响搜索主路径的响应时间
+      if (Math.random() < 0.01) {
+        const thirtyDaysAgo = new Date(
+          now.getTime() - 30 * 24 * 60 * 60 * 1000,
+        );
+        await this.prisma.searchLog.deleteMany({
+          where: { createdAt: { lt: thirtyDaysAgo } },
+        });
+      }
     } catch {
       // 记录失败不影响搜索
     }

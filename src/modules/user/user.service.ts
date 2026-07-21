@@ -156,29 +156,28 @@ export class UserService {
     if (!song) {
       throw new NotFoundException('歌曲不存在');
     }
-    const existing = await this.prisma.favorite.findUnique({
-      where: { userId_songId: { userId, songId } },
-    });
-    if (existing) {
-      // 取消收藏：删除记录 + favoriteCount -1
-      await this.prisma.$transaction([
-        this.prisma.favorite.delete({ where: { id: existing.id } }),
-        this.prisma.song.update({
+    // 检查 + 写入置于同一交互式事务，避免并发请求重复创建致 favoriteCount 错乱
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.favorite.findUnique({
+        where: { userId_songId: { userId, songId } },
+      });
+      if (existing) {
+        // 取消收藏：删除记录 + favoriteCount -1
+        await tx.favorite.delete({ where: { id: existing.id } });
+        await tx.song.update({
           where: { id: songId },
           data: { favoriteCount: { decrement: 1 } },
-        }),
-      ]);
-      return { favorited: false };
-    }
-    // 新增收藏：创建记录 + favoriteCount +1
-    await this.prisma.$transaction([
-      this.prisma.favorite.create({ data: { userId, songId } }),
-      this.prisma.song.update({
+        });
+        return { favorited: false };
+      }
+      // 新增收藏：创建记录 + favoriteCount +1
+      await tx.favorite.create({ data: { userId, songId } });
+      await tx.song.update({
         where: { id: songId },
         data: { favoriteCount: { increment: 1 } },
-      }),
-    ]);
-    return { favorited: true };
+      });
+      return { favorited: true };
+    });
   }
 
   /** 检查用户是否已收藏某首歌曲 */
@@ -314,15 +313,18 @@ export class UserService {
     });
     if (!album) throw new NotFoundException('专辑不存在');
 
-    const existing = await this.prisma.albumFavorite.findUnique({
-      where: { userId_albumId: { userId, albumId } },
+    // 检查 + 写入置于同一事务，避免并发请求重复创建
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.albumFavorite.findUnique({
+        where: { userId_albumId: { userId, albumId } },
+      });
+      if (existing) {
+        await tx.albumFavorite.delete({ where: { id: existing.id } });
+        return { favorited: false };
+      }
+      await tx.albumFavorite.create({ data: { userId, albumId } });
+      return { favorited: true };
     });
-    if (existing) {
-      await this.prisma.albumFavorite.delete({ where: { id: existing.id } });
-      return { favorited: false };
-    }
-    await this.prisma.albumFavorite.create({ data: { userId, albumId } });
-    return { favorited: true };
   }
 
   /** 检查用户是否已收藏某专辑 */
@@ -345,17 +347,20 @@ export class UserService {
     });
     if (!playlist) throw new NotFoundException('歌单不存在');
 
-    const existing = await this.prisma.playlistFavorite.findUnique({
-      where: { userId_playlistId: { userId, playlistId } },
+    // 检查 + 写入置于同一事务，避免并发请求重复创建
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.playlistFavorite.findUnique({
+        where: { userId_playlistId: { userId, playlistId } },
+      });
+      if (existing) {
+        await tx.playlistFavorite.delete({ where: { id: existing.id } });
+        return { favorited: false };
+      }
+      await tx.playlistFavorite.create({
+        data: { userId, playlistId },
+      });
+      return { favorited: true };
     });
-    if (existing) {
-      await this.prisma.playlistFavorite.delete({ where: { id: existing.id } });
-      return { favorited: false };
-    }
-    await this.prisma.playlistFavorite.create({
-      data: { userId, playlistId },
-    });
-    return { favorited: true };
   }
 
   /** 检查用户是否已收藏某歌单 */
