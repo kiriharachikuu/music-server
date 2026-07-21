@@ -346,6 +346,12 @@ export class UserController {
     return this.liveSessionService.getFavoriteClipIds(userId);
   }
 
+  /** GET /api/user/live-clips/favorites/list 已收藏的歌切完整数据 */
+  @Get('live-clips/favorites/list')
+  getFavoriteLiveClips(@CurrentUser('id') userId: string) {
+    return this.liveSessionService.getFavoriteClips(userId);
+  }
+
   /** DELETE /api/user/live-clips/:id/favorite 取消收藏歌切 */
   @Delete('live-clips/:id/favorite')
   @HttpCode(HttpStatus.OK)

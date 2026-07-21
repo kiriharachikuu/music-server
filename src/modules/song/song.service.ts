@@ -26,17 +26,27 @@ export class SongService {
    * - 若 lyricContent 为空，回退到读取 lyricUrl 文件内容
    * - 复用 admin-resource.helpers.readLyricFile（已加固路径穿越校验）
    * - 无歌词或读取失败：返回空字符串
+   * - 同时支持 official 歌曲和 live_clip 直播歌切
    */
   async getLyric(id: string): Promise<string> {
+    // 先查 song 表
     const song = await this.prisma.song.findFirst({
       where: { id, deletedAt: null, status: 'PUBLISHED' },
       select: { lyricContent: true, lyricUrl: true },
     });
-    if (!song) {
+    if (song) {
+      if (song.lyricContent) return song.lyricContent;
+      return readLyricFile(song.lyricUrl);
+    }
+
+    // song 表没找到，查 liveClip 表
+    const clip = await this.prisma.liveClip.findFirst({
+      where: { id, status: 'PUBLISHED' },
+      select: { lyricContent: true },
+    });
+    if (!clip) {
       throw new NotFoundException('歌曲不存在');
     }
-    // 优先返回在线编辑的歌词正文
-    if (song.lyricContent) return song.lyricContent;
-    return readLyricFile(song.lyricUrl);
+    return clip.lyricContent ?? '';
   }
 }

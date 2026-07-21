@@ -196,6 +196,22 @@ export class LiveSessionService {
     return favorites.map((f) => f.clipId);
   }
 
+  /** 获取用户已收藏的歌切完整数据列表 */
+  async getFavoriteClips(userId: string) {
+    const favorites = await this.prisma.liveClipFavorite.findMany({
+      where: { userId, clip: { status: 'PUBLISHED' } },
+      include: {
+        clip: {
+          include: {
+            session: { select: { id: true, title: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    return favorites.map((f) => f.clip);
+  }
+
   // ============ Admin ============
 
   /** Admin：分页搜索 + 状态筛选 */
