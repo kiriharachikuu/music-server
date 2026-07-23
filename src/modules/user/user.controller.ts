@@ -412,6 +412,22 @@ export class UserController {
     return this.userService.getDownloads(userId, { page, limit, pageSize });
   }
 
+  /** GET /api/user/preferences/quality 获取音质偏好 */
+  @Get('preferences/quality')
+  getQualityPreference(@CurrentUser('id') userId: string) {
+    return this.userService.getQualityPreference(userId);
+  }
+
+  /** PUT /api/user/preferences/quality 设置音质偏好 */
+  @Put('preferences/quality')
+  @HttpCode(HttpStatus.OK)
+  setQualityPreference(
+    @CurrentUser('id') userId: string,
+    @Body() dto: { quality: 'HIGH' | 'MEDIUM' | 'LOW' },
+  ) {
+    return this.userService.setQualityPreference(userId, dto.quality);
+  }
+
   /** 校验上传的图片文件（大小、MIME、扩展名） */
   private validateImage(file: Express.Multer.File) {
     if (!file) {

@@ -30,58 +30,84 @@ enum BannerStatus {
   HIDDEN
 }
 
+// 音质级别枚举
+enum QualityLevel {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+// 转码任务状态
+enum TranscodingJobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
 // 用户表
 model User {
-  id        String    @id @default(cuid())
-  username  String    @unique
-  email     String    @unique
-  password  String
-  avatar    String?
-  role      Role      @default(USER)
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  deletedAt DateTime?
-  /** 最近登录时间 */
-  lastLoginAt DateTime?
-  /** 累计登录次数 */
-  loginCount   Int     @default(0)
-  /** 密码最近更新时间，用于校验 JWT 是否在密码修改前签发（旧 token 自动失效） */
+  id                String    @id @default(cuid())
+  username          String    @unique
+  email             String    @unique
+  password          String
+  avatar            String?
+  role              Role      @default(USER)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  deletedAt         DateTime?
+  /**
+   * 最近登录时间
+   */
+  lastLoginAt       DateTime?
+  /**
+   * 累计登录次数
+   */
+  loginCount        Int       @default(0)
+  /**
+   * 密码最近更新时间，用于校验 JWT 是否在密码修改前签发（旧 token 自动失效）
+   */
   passwordUpdatedAt DateTime?
 
-  playlists       Playlist[]
-  favorites       Favorite[]
-  albumFavorites  AlbumFavorite[]
+  playlists         Playlist[]
+  favorites         Favorite[]
+  albumFavorites    AlbumFavorite[]
   playlistFavorites PlaylistFavorite[]
-  playHistories   PlayHistory[]
-  downloadRecords DownloadRecord[]
-  operationLogs   OperationLog[]
-  sessionFavorites LiveSessionFavorite[]
-  clipFavorites   LiveClipFavorite[]
+  playHistories     PlayHistory[]
+  downloadRecords   DownloadRecord[]
+  operationLogs     OperationLog[]
+  sessionFavorites  LiveSessionFavorite[]
+  clipFavorites     LiveClipFavorite[]
+  userPreference    UserPreference?
 
   @@index([deletedAt])
 }
 
 // 歌曲表
 model Song {
-  id          String     @id @default(cuid())
-  title       String
-  artist      String
-  albumId     String?
-  album       Album?     @relation(fields: [albumId], references: [id], onDelete: SetNull)
-  duration    Int
-  fileUrl     String
-  coverUrl    String?
-  lyricUrl    String?
-  /** 歌词正文（LRC 文本），优先于 lyricUrl 文件读取 */
-  lyricContent String?
-  releaseDate DateTime
-  plays       Int        @default(0)
-  /** 收藏数，收藏时 +1 / 取消时 -1 */
-  favoriteCount Int      @default(0)
-  status      SongStatus @default(PUBLISHED)
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
-  deletedAt   DateTime?
+  id            String     @id @default(cuid())
+  title         String
+  artist        String
+  albumId       String?
+  album         Album?     @relation(fields: [albumId], references: [id], onDelete: SetNull)
+  duration      Int
+  fileUrl       String
+  coverUrl      String?
+  lyricUrl      String?
+  /**
+   * 歌词正文（LRC 文本），优先于 lyricUrl 文件读取
+   */
+  lyricContent  String?
+  releaseDate   DateTime
+  plays         Int        @default(0)
+  /**
+   * 收藏数，收藏时 +1 / 取消时 -1
+   */
+  favoriteCount Int        @default(0)
+  status        SongStatus @default(PUBLISHED)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  deletedAt     DateTime?
 
   playlistSongs   PlaylistSong[]
   songTags        SongTag[]
@@ -90,6 +116,7 @@ model Song {
   playHistories   PlayHistory[]
   downloadRecords DownloadRecord[]
   banners         Banner[]
+  songQualities   SongQuality[]
 
   @@index([albumId])
   @@index([plays])
@@ -113,8 +140,8 @@ model Album {
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
 
-  songs         Song[]
-  albumArtists  AlbumArtist[]
+  songs          Song[]
+  albumArtists   AlbumArtist[]
   albumFavorites AlbumFavorite[]
 
   @@index([deletedAt])
@@ -131,14 +158,16 @@ model Playlist {
   userId      String
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   isPublic    Boolean   @default(true)
-  /** 系统歌单标记：官方运营歌单 */
+  /**
+   * 系统歌单标记：官方运营歌单
+   */
   isSystem    Boolean   @default(false)
   playCount   Int       @default(0)
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
 
-  playlistSongs PlaylistSong[]
+  playlistSongs     PlaylistSong[]
   playlistFavorites PlaylistFavorite[]
 
   @@index([userId])
@@ -170,11 +199,17 @@ model Banner {
   id        String       @id @default(cuid())
   title     String
   imageUrl  String
-  /** 点击跳转内部路径（优先级最低） */
+  /**
+   * 点击跳转内部路径（优先级最低）
+   */
   linkUrl   String?
-  /** 关联歌曲 ID：点击优先播放该歌曲（优先级最高） */
+  /**
+   * 关联歌曲 ID：点击优先播放该歌曲（优先级最高）
+   */
   songId    String?
-  /** 广告外链：点击打开新窗口（优先级中） */
+  /**
+   * 广告外链：点击打开新窗口（优先级中）
+   */
   adUrl     String?
   sort      Int          @default(0)
   status    BannerStatus @default(VISIBLE)
@@ -190,17 +225,25 @@ model Banner {
 model OperationLog {
   id         String   @id @default(cuid())
   userId     String?
-  /** 冗余存储用户名，避免用户被删后无法追溯 */
+  /**
+   * 冗余存储用户名，避免用户被删后无法追溯
+   */
   username   String?
-  /** 操作类型：CREATE_SONG / UPDATE_SONG / DELETE_SONG / CREATE_BANNER 等 */
+  /**
+   * 操作类型：CREATE_SONG / UPDATE_SONG / DELETE_SONG / CREATE_BANNER 等
+   */
   action     String
-  /** 资源类型：song / album / playlist / banner / user 等 */
+  /**
+   * 资源类型：song / album / playlist / banner / user 等
+   */
   resource   String?
   resourceId String?
-  /** 操作详情（描述或 JSON 字符串） */
+  /**
+   * 操作详情（描述或 JSON 字符串）
+   */
   detail     String?
   ip         String?
-  createdAt   DateTime @default(now())
+  createdAt  DateTime @default(now())
 
   user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
 
@@ -310,22 +353,22 @@ model SystemSetting {
 
 // App版本更新表
 model AppVersion {
-  id            String   @id @default(cuid())
-  versionCode   Int      @unique
-  versionName   String
-  title         String?
-  content       String?  // 更新内容，JSON数组字符串
-  downloadUrl   String
-  fileSize      Int      // 字节
-  md5           String?
-  forceUpdate   Boolean  @default(false)
-  minVersionCode Int     @default(0)
-  channel       String   @default("stable") // stable / beta
-  platform      String   @default("android") // android / ios / desktop
-  status        String   @default("published") // draft / published / deprecated
-  downloadCount Int      @default(0)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id             String   @id @default(cuid())
+  versionCode    Int      @unique
+  versionName    String
+  title          String?
+  content        String? // 更新内容，JSON数组字符串
+  downloadUrl    String
+  fileSize       Int // 字节
+  md5            String?
+  forceUpdate    Boolean  @default(false)
+  minVersionCode Int      @default(0)
+  channel        String   @default("stable") // stable / beta
+  platform       String   @default("android") // android / ios / desktop
+  status         String   @default("published") // draft / published / deprecated
+  downloadCount  Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   @@index([channel, platform, status])
   @@index([versionCode])
@@ -333,17 +376,17 @@ model AppVersion {
 
 // 歌手表
 model Artist {
-  id                 String        @id @default(cuid())
-  name               String        @unique
-  avatar             String?
-  bio                String?
+  id                  String    @id @default(cuid())
+  name                String    @unique
+  avatar              String?
+  bio                 String?
   representativeWorks String?
-  createdAt          DateTime      @default(now())
-  updatedAt          DateTime      @updatedAt
-  deletedAt          DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  deletedAt           DateTime?
 
-  songArtists        SongArtist[]
-  albumArtists       AlbumArtist[]
+  songArtists  SongArtist[]
+  albumArtists AlbumArtist[]
 
   @@index([name])
   @@index([deletedAt])
@@ -357,8 +400,8 @@ model SongArtist {
   sort      Int      @default(0)
   createdAt DateTime @default(now())
 
-  song    Song    @relation(fields: [songId], references: [id], onDelete: Cascade)
-  artist  Artist  @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  song   Song   @relation(fields: [songId], references: [id], onDelete: Cascade)
+  artist Artist @relation(fields: [artistId], references: [id], onDelete: Cascade)
 
   @@unique([songId, artistId])
   @@index([songId])
@@ -373,8 +416,8 @@ model AlbumArtist {
   sort      Int      @default(0)
   createdAt DateTime @default(now())
 
-  album   Album   @relation(fields: [albumId], references: [id], onDelete: Cascade)
-  artist  Artist  @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  album  Album  @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  artist Artist @relation(fields: [artistId], references: [id], onDelete: Cascade)
 
   @@unique([albumId, artistId])
   @@index([albumId])
@@ -411,7 +454,7 @@ model LiveSession {
   updatedAt     DateTime   @updatedAt
   deletedAt     DateTime?
 
-  clips           LiveClip[]
+  clips            LiveClip[]
   sessionFavorites LiveSessionFavorite[]
 
   @@index([liveTime])
@@ -436,8 +479,8 @@ model LiveClip {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
-  session   LiveSession        @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  favorites LiveClipFavorite[]
+  session       LiveSession        @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  favorites     LiveClipFavorite[]
   playlistSongs PlaylistSong[]
 
   @@index([sessionId])
@@ -468,8 +511,8 @@ model LiveClipFavorite {
   clipId    String
   createdAt DateTime @default(now())
 
-  user User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  clip LiveClip  @relation(fields: [clipId], references: [id], onDelete: Cascade)
+  user User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clip LiveClip @relation(fields: [clipId], references: [id], onDelete: Cascade)
 
   @@unique([userId, clipId])
   @@index([userId])
@@ -478,10 +521,75 @@ model LiveClipFavorite {
 // 上传文件记录表（用于孤立文件清理）
 model UploadRecord {
   id        String   @id @default(cuid())
-  path      String   // 存储引擎内部相对路径
-  category  String   // image / audio / lyric / apk / other
+  path      String // 存储引擎内部相对路径
+  category  String // image / audio / lyric / apk / other
   createdAt DateTime @default(now())
 
   @@index([createdAt])
   @@index([category])
+}
+
+// ============ 多音质切换功能 ============
+
+// 歌曲音质版本表
+model SongQuality {
+  id        String       @id @default(cuid())
+  songId    String
+  quality   QualityLevel
+  bitrate   Int // 比特率（kbps）
+  fileUrl   String // 音质版本文件 URL
+  fileSize  Int // 文件大小（字节）
+  createdAt DateTime     @default(now())
+
+  song Song @relation(fields: [songId], references: [id], onDelete: Cascade)
+
+  @@unique([songId, quality])
+  @@index([songId])
+  @@index([quality])
+}
+
+// 用户偏好设置表
+model UserPreference {
+  id               String       @id @default(cuid())
+  userId           String
+  preferredQuality QualityLevel @default(MEDIUM)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId])
+  @@index([userId])
+}
+
+// 批量转码任务表
+model TranscodingJob {
+  id             String               @id @default(cuid())
+  status         TranscodingJobStatus @default(PENDING)
+  totalSongs     Int                  @default(0)
+  completedSongs Int                  @default(0)
+  failedSongs    Int                  @default(0)
+  errorMessage   String?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  jobItems TranscodingJobItem[]
+}
+
+// 转码任务详情表
+model TranscodingJobItem {
+  id           String               @id @default(cuid())
+  jobId        String
+  songId       String
+  songTitle    String
+  songArtist   String
+  status       TranscodingJobStatus @default(PENDING)
+  errorMessage String?
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+
+  job TranscodingJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@index([status])
 }

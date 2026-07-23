@@ -12,7 +12,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
-import { AudioProcessService } from '../upload/audio-process.service';
+import { AudioProcessService, type AudioMetadata, type ParsedFilename } from '../upload/audio-process.service';
 import { STORAGE_SERVICE } from '../upload/storage.interface';
 import type { StorageService } from '../upload/storage.interface';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -92,6 +92,7 @@ export class AdminUploadController {
     @UploadedFile() file: Express.Multer.File,
     @Query('type') type?: string,
     @Query('transcode') transcode?: string,
+    @Query('quality') quality?: string,
   ) {
     if (!file) {
       throw new BadRequestException('文件不能为空');
@@ -132,40 +133,100 @@ export class AdminUploadController {
       );
     }
 
-    // 仅音频类型支持同步转码为 128kbps MP3；transcode=true 时先转码再走原存储流程
+    // 仅音频类型支持转码；transcode=true 时先转码再走原存储流程
     let transcoded = false;
+    let qualityVersions: Array<{ level: string; bitrate: number; url: string; path: string; size: number }> = [];
+
     if (category === 'audio' && transcode === 'true') {
-      const { buffer: mp3Buffer, filename: mp3Name } =
-        await this.audioProcess.transcodeToMp3(file.buffer, file.originalname);
-      // 替换原 buffer 和 filename，后续 storage.save 与 probeMetadata 均基于转码后的 MP3
-      file.buffer = mp3Buffer;
-      file.originalname = mp3Name;
-      file.size = mp3Buffer.length;
-      transcoded = true;
+      if (quality === 'multi') {
+        const results = await this.audioProcess.transcodeToMultipleQualities(
+          file.buffer,
+          file.originalname,
+        );
+
+        qualityVersions = await Promise.all(
+          results.map(async (r) => {
+            const uploadResult = await this.storage.upload(
+              {
+                buffer: r.buffer,
+                originalname: r.filename,
+                mimetype: 'audio/mpeg',
+                size: r.buffer.length,
+                fieldname: 'file',
+                encoding: '7bit',
+                destination: '',
+                filename: r.filename,
+                path: '',
+              } as Express.Multer.File,
+              category,
+            );
+            await this.prisma.uploadRecord.create({
+              data: { path: uploadResult.path, category },
+            });
+            return {
+              level: r.level,
+              bitrate: r.bitrate,
+              url: uploadResult.url,
+              path: uploadResult.path,
+              size: r.buffer.length,
+            };
+          }),
+        );
+
+        const primaryResult = qualityVersions.find((v) => v.level === 'medium');
+        if (primaryResult) {
+          file.buffer = Buffer.from('');
+          file.originalname = primaryResult.path;
+          file.size = primaryResult.size;
+        }
+        transcoded = true;
+      } else {
+        const { buffer: mp3Buffer, filename: mp3Name } =
+          await this.audioProcess.transcodeToMp3(file.buffer, file.originalname);
+        file.buffer = mp3Buffer;
+        file.originalname = mp3Name;
+        file.size = mp3Buffer.length;
+        transcoded = true;
+      }
     }
 
-    const result = await this.storage.upload(file, category);
+    const result =
+      qualityVersions.length > 0
+        ? { url: qualityVersions.find((v) => v.level === 'medium')?.url || '', path: '' }
+        : await this.storage.upload(file, category);
 
-    // 记录上传，用于孤立文件清理
-    await this.prisma.uploadRecord.create({
-      data: { path: result.path, category },
-    });
+    if (qualityVersions.length === 0) {
+      await this.prisma.uploadRecord.create({
+        data: { path: result.path, category },
+      });
+    }
 
-    // 仅音频类型解析元数据与文件名信息，图片 / 歌词保持原响应
     if (category !== 'audio') {
       return result;
     }
 
     const metadata = await this.audioProcess.probeMetadata(
-      file.buffer,
+      file.buffer.length > 0 ? file.buffer : Buffer.from([]),
       file.originalname,
     );
     const parsed = this.audioProcess.parseFilename(file.originalname);
 
-    // 仅当实际转码时标注 transcoded: true
-    return transcoded
-      ? { ...result, metadata, parsed, transcoded: true }
-      : { ...result, metadata, parsed };
+    const response: {
+      url: string;
+      path: string;
+      metadata: AudioMetadata;
+      parsed: ParsedFilename;
+      transcoded?: boolean;
+      qualityVersions?: { level: string; url: string; path: string }[];
+    } = {
+      ...result,
+      metadata,
+      parsed,
+      ...(transcoded ? { transcoded: true } : {}),
+      ...(qualityVersions.length > 0 ? { qualityVersions } : {}),
+    };
+
+    return response;
   }
 
   private getFileExtension(filename: string): string {

@@ -20,4 +20,10 @@ export class SongController {
   async getLyric(@Param('id') id: string) {
     return { content: await this.songService.getLyric(id) };
   }
+
+  /** GET /api/songs/:id/qualities 音质列表 */
+  @Get(':id/qualities')
+  getQualities(@Param('id') id: string) {
+    return this.songService.getQualities(id);
+  }
 }

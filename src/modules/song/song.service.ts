@@ -22,6 +22,52 @@ export class SongService {
   }
 
   /**
+   * 获取歌曲音质列表
+   * - 从 SongQuality 表查询该歌曲的所有音质版本
+   * - 若无音质数据，返回默认音质选项（使用原始文件）
+   */
+  async getQualities(id: string) {
+    const song = await this.prisma.song.findFirst({
+      where: { id, deletedAt: null, status: 'PUBLISHED' },
+      select: { fileUrl: true },
+    });
+
+    if (!song) {
+      throw new NotFoundException('歌曲不存在');
+    }
+
+    const qualities = await this.prisma.songQuality.findMany({
+      where: { songId: id },
+      select: {
+        quality: true,
+        bitrate: true,
+        fileUrl: true,
+        fileSize: true,
+      },
+    });
+
+    if (qualities.length === 0) {
+      return [
+        {
+          level: 'default' as const,
+          quality: 'DEFAULT',
+          bitrate: 0,
+          fileUrl: song.fileUrl,
+          fileSize: 0,
+        },
+      ];
+    }
+
+    return qualities.map((q) => ({
+      level: q.quality.toLowerCase() as 'high' | 'medium' | 'low',
+      quality: q.quality,
+      bitrate: q.bitrate,
+      fileUrl: q.fileUrl,
+      fileSize: q.fileSize,
+    }));
+  }
+
+  /**
    * 获取歌词：优先返回 lyricContent（在线编辑的正文）
    * - 若 lyricContent 为空，回退到读取 lyricUrl 文件内容
    * - 复用 admin-resource.helpers.readLyricFile（已加固路径穿越校验）

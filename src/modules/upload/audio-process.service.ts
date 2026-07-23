@@ -32,6 +32,28 @@ export interface ParsedFilename {
   date?: string;
 }
 
+/** 音质配置 */
+export interface QualityConfig {
+  level: 'high' | 'medium' | 'low';
+  bitrate: string;
+  kbps: number;
+}
+
+/** 转码结果 */
+export interface TranscodeResult {
+  level: 'high' | 'medium' | 'low';
+  bitrate: number;
+  buffer: Buffer;
+  filename: string;
+}
+
+/** 音质配置列表 */
+export const QUALITY_CONFIGS: QualityConfig[] = [
+  { level: 'high', bitrate: '320k', kbps: 320 },
+  { level: 'medium', bitrate: '192k', kbps: 192 },
+  { level: 'low', bitrate: '128k', kbps: 128 },
+];
+
 /** 完整日期：2024-01-02 / 2024/01/02 / 20240102（同一段内不含字段分隔符 "-"） */
 const DATE_FULL_RE = /^\d{4}[-/]?\d{2}[-/]?\d{2}$/;
 /** 仅年份：2024 */
@@ -153,6 +175,73 @@ export class AudioProcessService {
   }
 
   /**
+   * 将音频 buffer 转码为多种音质版本
+   * 实现：写临时输入文件（保留原扩展名）→ 并行调用 ffmpeg 转码到多个临时输出文件
+   *      → 读回各输出 buffer → 清理临时文件
+   * 转码失败时记录警告并返回成功的结果，不抛出异常
+   * @returns 转码结果列表（可能部分失败）
+   */
+  async transcodeToMultipleQualities(
+    buffer: Buffer,
+    filename: string,
+  ): Promise<TranscodeResult[]> {
+    const ext = path.extname(filename) || '';
+    const tmpInput = path.join(os.tmpdir(), `${randomUUID()}${ext}`);
+    const baseName = path.basename(filename, ext);
+
+    try {
+      await fs.writeFile(tmpInput, buffer);
+      this.logger.log(`开始多音质转码：${filename}`);
+
+      const transcodePromises = QUALITY_CONFIGS.map(async (config) => {
+        const tmpOutput = path.join(os.tmpdir(), `${randomUUID()}.mp3`);
+        try {
+          await this.runTranscodeWithBitrate(tmpInput, tmpOutput, config.bitrate);
+          const outputBuffer = await fs.readFile(tmpOutput);
+          const newFilename = `${baseName}.${config.level}.mp3`;
+          this.logger.log(`转码完成 [${config.level}]: ${newFilename}`);
+          return {
+            level: config.level,
+            bitrate: config.kbps,
+            buffer: outputBuffer,
+            filename: newFilename,
+          } as TranscodeResult;
+        } catch (err) {
+          this.logger.warn(
+            `转码失败 [${config.level}]: ${filename} - ${(err as Error).message}`,
+          );
+          return null;
+        } finally {
+          try {
+            await fs.unlink(tmpOutput);
+          } catch {
+            // 临时文件可能已不存在，忽略
+          }
+        }
+      });
+
+      const results = await Promise.all(transcodePromises);
+      const successfulResults = results.filter(
+        (r): r is TranscodeResult => r !== null,
+      );
+
+      this.logger.log(`多音质转码完成：成功 ${successfulResults.length}/${QUALITY_CONFIGS.length}`);
+      return successfulResults;
+    } catch (err) {
+      this.logger.warn(
+        `多音质转码失败：${filename} - ${(err as Error).message}`,
+      );
+      return [];
+    } finally {
+      try {
+        await fs.unlink(tmpInput);
+      } catch {
+        // 临时文件可能已不存在，忽略
+      }
+    }
+  }
+
+  /**
    * 按约定解析文件名
    * 约定格式：
    *   - "歌名-演唱者-原唱-日期"
@@ -226,11 +315,19 @@ export class AudioProcessService {
    * .output() 指定输出文件后用 .run() 启动转码
    */
   private runTranscode(inputFile: string, outputFile: string): Promise<void> {
+    return this.runTranscodeWithBitrate(inputFile, outputFile, '128k');
+  }
+
+  /**
+   * 调用 ffmpeg 将输入文件转码为指定比特率的 MP3 输出
+   * @param bitrate 比特率，如 '128k', '192k', '320k'
+   */
+  private runTranscodeWithBitrate(inputFile: string, outputFile: string, bitrate: string): Promise<void> {
     return new Promise((resolve, reject) => {
       ffmpeg(inputFile)
         .output(outputFile)
         .audioCodec('libmp3lame')
-        .audioBitrate('128k')
+        .audioBitrate(bitrate)
         .format('mp3')
         .noVideo()
         .on('error', (err: Error) => reject(err))

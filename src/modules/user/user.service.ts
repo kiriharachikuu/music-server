@@ -546,4 +546,38 @@ export class UserService {
     }
     return playlist;
   }
+
+  /** 获取用户音质偏好 */
+  async getQualityPreference(userId: string) {
+    const preference = await this.prisma.userPreference.findUnique({
+      where: { userId },
+      select: { preferredQuality: true },
+    });
+
+    if (!preference) {
+      return { preferredQuality: 'MEDIUM' as const };
+    }
+
+    return { preferredQuality: preference.preferredQuality };
+  }
+
+  /** 设置用户音质偏好 */
+  async setQualityPreference(userId: string, quality: 'HIGH' | 'MEDIUM' | 'LOW') {
+    const existing = await this.prisma.userPreference.findUnique({
+      where: { userId },
+    });
+
+    if (existing) {
+      await this.prisma.userPreference.update({
+        where: { userId },
+        data: { preferredQuality: quality },
+      });
+    } else {
+      await this.prisma.userPreference.create({
+        data: { userId, preferredQuality: quality },
+      });
+    }
+
+    return { preferredQuality: quality };
+  }
 }

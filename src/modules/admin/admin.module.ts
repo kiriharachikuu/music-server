@@ -10,9 +10,11 @@ import { AdminTagController } from './admin-tag.controller';
 import { AdminUploadController } from './admin-upload.controller';
 import { AdminUserController } from './admin-user.controller';
 import { AdminController } from './admin.controller';
+import { AdminTranscodingController } from './admin-transcoding.controller';
 import { AdminResourceService } from './admin-resource.service';
 import { AdminService } from './admin.service';
 import { MigrationService } from './migration.service';
+import { TranscodingService } from './transcoding.service';
 import { OperationLogModule } from '../operation-log/operation-log.module';
 import { AdminLiveSessionController } from './admin-live-session.controller';
 import { AdminLiveClipController } from './admin-live-clip.controller';
@@ -40,7 +42,8 @@ import { LiveSessionModule } from '../live-session/live-session.module';
     AdminMigrationController,
     AdminLiveSessionController,
     AdminLiveClipController,
+    AdminTranscodingController,
   ],
-  providers: [AdminService, AdminResourceService, MigrationService],
+  providers: [AdminService, AdminResourceService, MigrationService, TranscodingService],
 })
 export class AdminModule {}
