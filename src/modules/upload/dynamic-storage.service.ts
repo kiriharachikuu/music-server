@@ -179,7 +179,9 @@ export class DynamicStorageService implements StorageService {
           key = `${category}/${ym}/${randomUUID()}${ext}`;
         }
         await s3.send(new PutObjectCommand({
-          Bucket: bucket, Key: key, Body: file.buffer, ContentType: guessContentType(file.originalname),
+          Bucket: bucket, Key: key, Body: file.buffer, 
+          ContentType: guessContentType(file.originalname),
+          CacheControl: 'public, max-age=2592000',
         }));
         return { url: getS3Url(key), path: key };
       },
@@ -250,6 +252,7 @@ export class DynamicStorageService implements StorageService {
           cos.putObject({
             Bucket: bucket, Region: region, Key: key,
             Body: file.buffer, ContentType: guessContentType(file.originalname),
+            CacheControl: 'public, max-age=2592000',
           }, (err: any) => err ? reject(err) : resolve());
         });
         return { url: getCosUrl(key), path: key };
