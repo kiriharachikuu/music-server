@@ -34,11 +34,15 @@ export class AdminResourceService {
     page?: string;
     limit?: string;
     pageSize?: string;
+    status?: string;
+    albumId?: string;
   }): Promise<PaginatedResult<unknown>> {
     const { page, limit, skip, take } = parsePagination(query);
     const where = {
       deletedAt: null,
       ...buildKeywordWhere(query.keyword, ['title', 'artist']),
+      ...(query.status ? { status: query.status } : {}),
+      ...(query.albumId ? { albumId: query.albumId } : {}),
     };
     const [list, total] = await this.prisma.$transaction([
       this.prisma.song.findMany({
@@ -50,6 +54,9 @@ export class AdminResourceService {
           album: true,
           songTags: { include: { tag: true } },
           songArtists: { include: { artist: true } },
+          songQualities: {
+            select: { quality: true, bitrate: true, fileUrl: true, fileSize: true },
+          },
         },
       }),
       this.prisma.song.count({ where }),

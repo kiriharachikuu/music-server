@@ -17,6 +17,7 @@ export class TranscodingService {
   ) {}
 
   async createJob(): Promise<{ jobId: string }> {
+    // 查询已发布但尚未完成全部三种音质转码的歌曲
     const songsWithoutQuality = await this.prisma.song.findMany({
       where: {
         deletedAt: null,
@@ -27,8 +28,19 @@ export class TranscodingService {
         title: true,
         artist: true,
         fileUrl: true,
+        songQualities: {
+          select: { quality: true },
+        },
       },
     });
+
+    // 只对还没有完整三种音质的歌曲创建任务
+    const songsToTranscode = songsWithoutQuality.filter(
+      (song) => {
+        const doneLevels = new Set(song.songQualities.map((q) => q.quality));
+        return doneLevels.size < 3;
+      },
+    );
 
     const existingJobs = await this.prisma.transcodingJob.findMany({
       where: {
@@ -40,9 +52,13 @@ export class TranscodingService {
       return { jobId: existingJobs[0].id };
     }
 
+    if (songsToTranscode.length === 0) {
+      return { jobId: 'no_songs' };
+    }
+
     const job = await this.prisma.transcodingJob.create({
       data: {
-        totalSongs: songsWithoutQuality.length,
+        totalSongs: songsToTranscode.length,
         completedSongs: 0,
         failedSongs: 0,
         status: 'PENDING',
@@ -50,7 +66,7 @@ export class TranscodingService {
     });
 
     await this.prisma.transcodingJobItem.createMany({
-      data: songsWithoutQuality.map((song) => ({
+      data: songsToTranscode.map((song) => ({
         jobId: job.id,
         songId: song.id,
         songTitle: song.title,
@@ -145,7 +161,6 @@ export class TranscodingService {
       where: { id: jobId },
       data: {
         status: 'PROCESSING',
-        completedSongs: job.completedSongs - failedItems.length,
         failedSongs: 0,
       },
     });
@@ -181,7 +196,7 @@ export class TranscodingService {
         where: { id: jobId },
       });
 
-      if (progress?.completedSongs === progress?.totalSongs) {
+      if (progress && progress.completedSongs + progress.failedSongs >= progress.totalSongs) {
         await this.prisma.transcodingJob.update({
           where: { id: jobId },
           data: { status: 'COMPLETED' },
@@ -218,6 +233,10 @@ export class TranscodingService {
         buffer,
         `${item.songTitle}.mp3`,
       );
+
+      if (results.length === 0) {
+        throw new Error('所有音质转码均失败');
+      }
 
       const qualityRecords = await Promise.all(
         results.map(async (r) => {
@@ -288,6 +307,91 @@ export class TranscodingService {
       throw new Error(`下载文件失败：${response.status}`);
     }
     return Buffer.from(await response.arrayBuffer());
+  }
+
+  /** 为单首歌曲创建转码任务（异步执行，立即返回 jobId） */
+  async transcodeSingleSong(songId: string): Promise<{
+    jobId: string;
+    message: string;
+  }> {
+    const song = await this.prisma.song.findUnique({
+      where: { id: songId, deletedAt: null },
+      select: { id: true, title: true, artist: true, fileUrl: true },
+    });
+    if (!song) {
+      throw new Error('歌曲不存在');
+    }
+
+    // 检查是否有未完成的转码任务项（去重）
+    const existingItem = await this.prisma.transcodingJobItem.findFirst({
+      where: { songId, status: { in: ['PENDING', 'PROCESSING'] } },
+    });
+    if (existingItem) {
+      throw new Error('该歌曲已有正在进行的转码任务');
+    }
+
+    // 创建 job
+    const job = await this.prisma.transcodingJob.create({
+      data: {
+        totalSongs: 1,
+        completedSongs: 0,
+        failedSongs: 0,
+        status: 'PROCESSING',
+      },
+    });
+
+    const item = await this.prisma.transcodingJobItem.create({
+      data: {
+        jobId: job.id,
+        songId: song.id,
+        songTitle: song.title,
+        songArtist: song.artist,
+        status: 'PENDING',
+      },
+    });
+
+    // 异步执行转码（不 await，后台处理）
+    this.processSong(
+      { id: item.id, songId: song.id, songTitle: song.title, songArtist: song.artist },
+      job.id,
+    )
+      .then(() => {
+        // processSong 内部已处理 completed/failed 计数
+        // 检查是否全部完成
+        return this.prisma.transcodingJob.findUnique({ where: { id: job.id } });
+      })
+      .then((progress) => {
+        if (progress && progress.completedSongs + progress.failedSongs >= progress.totalSongs) {
+          return this.prisma.transcodingJob.update({
+            where: { id: job.id },
+            data: { status: 'COMPLETED' },
+          });
+        }
+      })
+      .catch((err) => {
+        this.logger.error(`单曲转码异常：${song.title} - ${(err as Error).message}`);
+      });
+
+    return { jobId: job.id, message: '转码任务已启动' };
+  }
+
+  /** 获取歌曲的转码/音质状态 */
+  async getSongQualityStatus(songId: string) {
+    const qualities = await this.prisma.songQuality.findMany({
+      where: { songId },
+      select: { quality: true, bitrate: true, fileUrl: true, fileSize: true },
+    });
+
+    const latestJob = await this.prisma.transcodingJobItem.findFirst({
+      where: { songId },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return {
+      hasQualities: qualities.length > 0,
+      qualities,
+      transcodingStatus: latestJob?.status ?? null,
+    };
   }
 
   private chunkArray<T>(array: T[], size: number): T[][] {

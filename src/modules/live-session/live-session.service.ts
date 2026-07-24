@@ -438,4 +438,36 @@ export class LiveSessionService {
     });
     return { updated: true };
   }
+
+  /** Admin：获取歌切歌词正文 */
+  async adminClipGetLyric(id: string): Promise<{ content: string }> {
+    const clip = await this.prisma.liveClip.findUnique({
+      where: { id },
+      select: { lyricContent: true },
+    });
+    if (!clip) throw new NotFoundException('歌切不存在');
+    return { content: clip.lyricContent ?? '' };
+  }
+
+  /** Admin：设置歌切歌词正文 */
+  async adminClipSetLyric(id: string, content: string): Promise<{ saved: true }> {
+    const clip = await this.prisma.liveClip.findUnique({ where: { id } });
+    if (!clip) throw new NotFoundException('歌切不存在');
+    await this.prisma.liveClip.update({
+      where: { id },
+      data: { lyricContent: content || null },
+    });
+    return { saved: true };
+  }
+
+  /** Admin：删除歌切歌词正文 */
+  async adminClipDeleteLyric(id: string): Promise<{ deleted: true }> {
+    const clip = await this.prisma.liveClip.findUnique({ where: { id } });
+    if (!clip) throw new NotFoundException('歌切不存在');
+    await this.prisma.liveClip.update({
+      where: { id },
+      data: { lyricContent: null },
+    });
+    return { deleted: true };
+  }
 }

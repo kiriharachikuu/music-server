@@ -13,6 +13,9 @@ export class AdminTranscodingController {
   @Post('start')
   async startTranscoding() {
     const { jobId } = await this.transcodingService.createJob();
+    if (jobId === 'no_songs') {
+      return { jobId, message: '所有歌曲已完成音质转码，无需创建新任务' };
+    }
     await this.transcodingService.startJob(jobId);
     return { jobId, message: '批量转码任务已启动' };
   }

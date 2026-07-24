@@ -83,4 +83,24 @@ export class AdminLiveClipController {
   ) {
     return this.liveSessionService.adminClipBatchStatus(dto.ids, dto.status);
   }
+
+  /** GET /api/admin/live-clips/:id/lyric 获取歌词正文 */
+  @Get(':id/lyric')
+  adminGetLyric(@Param('id') id: string) {
+    return this.liveSessionService.adminClipGetLyric(id);
+  }
+
+  /** POST /api/admin/live-clips/:id/lyric 设置歌词正文 */
+  @Post(':id/lyric')
+  @HttpCode(HttpStatus.OK)
+  adminSetLyric(@Param('id') id: string, @Body() body: { content: string }) {
+    return this.liveSessionService.adminClipSetLyric(id, body.content ?? '');
+  }
+
+  /** DELETE /api/admin/live-clips/:id/lyric 删除歌词正文 */
+  @Delete(':id/lyric')
+  @HttpCode(HttpStatus.OK)
+  adminDeleteLyric(@Param('id') id: string) {
+    return this.liveSessionService.adminClipDeleteLyric(id);
+  }
 }

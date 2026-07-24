@@ -1,5 +1,6 @@
 import {
   Body,
+  BadRequestException,
   Controller,
   Delete,
   Get,
@@ -13,6 +14,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { AdminResourceService } from './admin-resource.service';
+import { TranscodingService } from './transcoding.service';
 import { CreateSongDto, UpdateSongDto } from './dto/song.dto';
 
 /** 后台歌曲管理 路由前缀 /api/admin/songs */
@@ -20,7 +22,10 @@ import { CreateSongDto, UpdateSongDto } from './dto/song.dto';
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('ADMIN', 'EDITOR')
 export class AdminSongController {
-  constructor(private readonly resource: AdminResourceService) {}
+  constructor(
+    private readonly resource: AdminResourceService,
+    private readonly transcoding: TranscodingService,
+  ) {}
 
   @Get()
   list(
@@ -28,8 +33,10 @@ export class AdminSongController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('pageSize') pageSize?: string,
+    @Query('status') status?: string,
+    @Query('albumId') albumId?: string,
   ) {
-    return this.resource.listSongs({ keyword, page, limit, pageSize });
+    return this.resource.listSongs({ keyword, page, limit, pageSize, status, albumId });
   }
 
   @Post()
@@ -76,5 +83,21 @@ export class AdminSongController {
   @Post('batch/status')
   batchUpdateStatus(@Body() dto: { ids: string[]; status: 'PUBLISHED' | 'DRAFT' }) {
     return this.resource.batchUpdateSongStatus(dto.ids, dto.status);
+  }
+
+  /** POST /api/admin/songs/:id/transcode 单曲转码 */
+  @Post(':id/transcode')
+  async transcodeSong(@Param('id') id: string) {
+    try {
+      return await this.transcoding.transcodeSingleSong(id);
+    } catch (err) {
+      throw new BadRequestException((err as Error).message);
+    }
+  }
+
+  /** GET /api/admin/songs/:id/quality-status 获取歌曲音质转码状态 */
+  @Get(':id/quality-status')
+  getQualityStatus(@Param('id') id: string) {
+    return this.transcoding.getSongQualityStatus(id);
   }
 }

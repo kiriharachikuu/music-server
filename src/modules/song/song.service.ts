@@ -25,46 +25,66 @@ export class SongService {
    * 获取歌曲音质列表
    * - 从 SongQuality 表查询该歌曲的所有音质版本
    * - 若无音质数据，返回默认音质选项（使用原始文件）
+   * - 同时支持 official 歌曲和 live_clip 直播歌切
    */
   async getQualities(id: string) {
+    // 先查 song 表
     const song = await this.prisma.song.findFirst({
       where: { id, deletedAt: null, status: 'PUBLISHED' },
       select: { fileUrl: true },
     });
 
-    if (!song) {
+    if (song) {
+      const qualities = await this.prisma.songQuality.findMany({
+        where: { songId: id },
+        select: {
+          quality: true,
+          bitrate: true,
+          fileUrl: true,
+          fileSize: true,
+        },
+      });
+
+      if (qualities.length === 0) {
+        return [
+          {
+            level: 'default' as const,
+            quality: 'DEFAULT',
+            bitrate: 0,
+            fileUrl: song.fileUrl,
+            fileSize: 0,
+          },
+        ];
+      }
+
+      return qualities.map((q) => ({
+        level: q.quality.toLowerCase() as 'high' | 'medium' | 'low',
+        quality: q.quality,
+        bitrate: q.bitrate,
+        fileUrl: q.fileUrl,
+        fileSize: q.fileSize,
+      }));
+    }
+
+    // song 表没找到，查 liveClip 表
+    const clip = await this.prisma.liveClip.findFirst({
+      where: { id, status: 'PUBLISHED' },
+      select: { fileUrl: true },
+    });
+    if (!clip) {
       throw new NotFoundException('歌曲不存在');
     }
 
-    const qualities = await this.prisma.songQuality.findMany({
-      where: { songId: id },
-      select: {
-        quality: true,
-        bitrate: true,
-        fileUrl: true,
-        fileSize: true,
+    // 歌切只有原始文件，返回默认音质
+    return [
+      {
+        level: 'default' as const,
+        quality: 'DEFAULT',
+        bitrate: 0,
+        fileUrl: clip.fileUrl,
+        fileSize: 0,
       },
-    });
-
-    if (qualities.length === 0) {
-      return [
-        {
-          level: 'default' as const,
-          quality: 'DEFAULT',
-          bitrate: 0,
-          fileUrl: song.fileUrl,
-          fileSize: 0,
-        },
-      ];
-    }
-
-    return qualities.map((q) => ({
-      level: q.quality.toLowerCase() as 'high' | 'medium' | 'low',
-      quality: q.quality,
-      bitrate: q.bitrate,
-      fileUrl: q.fileUrl,
-      fileSize: q.fileSize,
-    }));
+    ];
   }
 
   /**
