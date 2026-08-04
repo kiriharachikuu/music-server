@@ -555,7 +555,7 @@ export class UserService {
     });
 
     if (!preference) {
-      return { preferredQuality: 'MEDIUM' as const };
+      return { preferredQuality: 'LOW' as const };
     }
 
     return { preferredQuality: preference.preferredQuality };

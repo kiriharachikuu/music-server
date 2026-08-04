@@ -235,8 +235,9 @@ export class AudioProcessService {
 
   /**
    * 将音频 buffer 转码为多种音质版本
-   * 实现：写临时输入文件（保留原扩展名）→ 并行调用 ffmpeg 转码到多个临时输出文件
+   * 实现：写临时输入文件（保留原扩展名）→ 探测源文件比特率 → 并行调用 ffmpeg 转码到多个临时输出文件
    *      → 读回各输出 buffer → 清理临时文件
+   * 禁止低音质源文件上转码到高音质：只生成 ≤ 源文件比特率的版本
    * 转码失败时记录警告并返回成功的结果，不抛出异常
    * @returns 转码结果列表（可能部分失败）
    */
@@ -250,9 +251,27 @@ export class AudioProcessService {
 
     try {
       await fs.writeFile(tmpInput, buffer);
-      this.logger.log(`开始多音质转码：${filename}`);
 
-      const transcodePromises = QUALITY_CONFIGS.map(async (config) => {
+      // 探测源文件比特率，用于过滤不需要的高音质转码
+      const metadata = await this.probeMetadata(buffer, filename);
+      const sourceBitrate = metadata.bitrate ?? 0;
+      this.logger.log(`开始多音质转码：${filename}（源文件比特率: ${sourceBitrate}bps ≈ ${Math.round(sourceBitrate / 1000)}kbps）`);
+
+      // 过滤：只转码 ≤ 源文件比特率的音质版本，跳过上转码
+      const applicableConfigs = QUALITY_CONFIGS.filter((config) => {
+        if (sourceBitrate > 0 && config.kbps * 1000 > sourceBitrate) {
+          this.logger.log(`跳过上转码 [${config.level}]: 源文件 ${Math.round(sourceBitrate / 1000)}kbps < 目标 ${config.kbps}kbps`);
+          return false;
+        }
+        return true;
+      });
+
+      if (applicableConfigs.length === 0) {
+        this.logger.warn(`源文件比特率过低，无适用的转码配置：${filename}`);
+        return [];
+      }
+
+      const transcodePromises = applicableConfigs.map(async (config) => {
         const tmpOutput = path.join(os.tmpdir(), `${randomUUID()}.mp3`);
         try {
           await this.runTranscodeWithBitrate(tmpInput, tmpOutput, config.bitrate);
@@ -284,7 +303,7 @@ export class AudioProcessService {
         (r): r is TranscodeResult => r !== null,
       );
 
-      this.logger.log(`多音质转码完成：成功 ${successfulResults.length}/${QUALITY_CONFIGS.length}`);
+      this.logger.log(`多音质转码完成：成功 ${successfulResults.length}/${applicableConfigs.length}`);
       return successfulResults;
     } catch (err) {
       this.logger.warn(
