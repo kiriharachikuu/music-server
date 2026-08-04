@@ -328,6 +328,7 @@ model PlayHistory {
   song Song @relation(fields: [songId], references: [id], onDelete: Cascade)
 
   @@index([userId, playTime])
+  @@index([songId, playTime])
 }
 
 // 下载记录表

@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { HotRankingService } from './hot-ranking.service';
+import { SoarRankingService } from './soar-ranking.service';
 
 /**
  * 站点公开设置项白名单
@@ -17,7 +19,11 @@ const PUBLIC_SETTING_KEYS = [
 
 @Injectable()
 export class StatsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly hotRankingService: HotRankingService,
+    private readonly soarRankingService: SoarRankingService,
+  ) {}
 
   /**
    * 发现页聚合数据
@@ -88,28 +94,22 @@ export class StatsService {
   }
 
   /**
-   * 排行榜：基于官方歌单（isSystem=true）的人工推荐
-   * 每个榜单对应一个标记为系统歌单的官方歌单：
-   * - soar（飙升榜）：匹配名称包含"飙升"的系统歌单
-   * - new（新歌榜）：匹配名称包含"新歌"的系统歌单
-   * - hot（热歌榜）：匹配名称包含"热歌"的系统歌单
+   * 排行榜
+   * - soar（飙升榜）：对比本周与上周播放增长量，自动排名前 50，每周一更新
+   * - new（新歌榜）：基于官方系统歌单（人工推荐）
+   * - hot（热歌榜）：基于过去 7 天播放量自动排名前 50，每周一更新
    *
-   * 注意：已彻底停用基于播放量/收藏量的自动推送算法。
-   * 若未配置对应官方歌单，返回空数组。
-   * 歌曲顺序严格遵循歌单内歌曲的 sort 字段排序。
+   * 飙升榜/热歌榜数据来源：定时计算并缓存到 SystemSetting，
+   * 同时同步到对应系统歌单。此处直接读取缓存的歌曲 ID 列表查询详情。
    */
   async getRankings(_by: 'play' | 'favorite' = 'play') {
-    const rankingKeywords: { key: 'soar' | 'new' | 'hot'; keyword: string }[] = [
-      { key: 'soar', keyword: '飙升' },
-      { key: 'new', keyword: '新歌' },
-      { key: 'hot', keyword: '热歌' },
-    ];
-
+    // 新歌榜：仍从人工推荐的系统歌单读取
     const systemPlaylists = await this.prisma.playlist.findMany({
       where: {
         isSystem: true,
         deletedAt: null,
         isPublic: true,
+        name: { contains: '新歌' },
       },
       include: {
         playlistSongs: {
@@ -129,11 +129,43 @@ export class StatsService {
       hot: [],
     };
 
-    for (const { key, keyword } of rankingKeywords) {
-      const matched = systemPlaylists.find((p) => p.name.includes(keyword));
-      if (matched) {
-        result[key] = matched.playlistSongs.map((ps) => ps.song);
-      }
+    // 新歌榜：从人工推荐的系统歌单读取
+    if (systemPlaylists.length > 0) {
+      result.new = systemPlaylists[0].playlistSongs.map((ps) => ps.song);
+    }
+
+    // 飙升榜：基于播放增长量自动排名
+    const soarSongIds = await this.soarRankingService.getCachedSongIds();
+    if (soarSongIds.length > 0) {
+      const soarSongs = await this.prisma.song.findMany({
+        where: {
+          id: { in: soarSongIds },
+          deletedAt: null,
+          status: 'PUBLISHED',
+        },
+        include: { album: true },
+      });
+      const songMap = new Map(soarSongs.map((s) => [s.id, s]));
+      result.soar = soarSongIds
+        .map((id) => songMap.get(id))
+        .filter((s): s is NonNullable<typeof s> => !!s);
+    }
+
+    // 热歌榜：基于过去 7 天播放量自动排名
+    const hotSongIds = await this.hotRankingService.getCachedSongIds();
+    if (hotSongIds.length > 0) {
+      const hotSongs = await this.prisma.song.findMany({
+        where: {
+          id: { in: hotSongIds },
+          deletedAt: null,
+          status: 'PUBLISHED',
+        },
+        include: { album: true },
+      });
+      const songMap = new Map(hotSongs.map((s) => [s.id, s]));
+      result.hot = hotSongIds
+        .map((id) => songMap.get(id))
+        .filter((s): s is NonNullable<typeof s> => !!s);
     }
 
     return result;
