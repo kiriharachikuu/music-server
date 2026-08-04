@@ -1,10 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'crypto';
+import { execSync } from 'child_process';
 import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 import ffmpeg from 'fluent-ffmpeg';
-import ffmpegPath from 'ffmpeg-static';
 import ffprobePath from 'ffprobe-static';
 
 /** 音频元数据探测结果 */
@@ -73,11 +73,46 @@ export class AudioProcessService {
   private readonly logger = new Logger(AudioProcessService.name);
 
   constructor() {
-    // 指定 ffmpeg 和 ffprobe 二进制路径，避免依赖系统 PATH
-    if (ffmpegPath) {
-      ffmpeg.setFfmpegPath(ffmpegPath);
+    // 自动检测 ffmpeg 路径：优先使用环境变量 FFMPEG_PATH，其次查找系统 PATH
+    const resolvedFfmpegPath = this.resolveFfmpegPath();
+    if (resolvedFfmpegPath) {
+      ffmpeg.setFfmpegPath(resolvedFfmpegPath);
+      this.logger.log(`使用 ffmpeg: ${resolvedFfmpegPath}`);
+    } else {
+      this.logger.warn('未找到 ffmpeg，转码功能可能不可用');
     }
     ffmpeg.setFfprobePath(ffprobePath.path);
+  }
+
+  /**
+   * 解析 ffmpeg 路径
+   * 优先使用环境变量 FFMPEG_PATH，其次尝试使用系统 PATH 中的 ffmpeg
+   */
+  private resolveFfmpegPath(): string | null {
+    // 1. 优先使用环境变量
+    const envPath = process.env.FFMPEG_PATH;
+    if (envPath) {
+      try {
+        execSync(`"${envPath}" -version`, { stdio: 'ignore' });
+        return envPath;
+      } catch {
+        this.logger.warn(`环境变量 FFMPEG_PATH 指向的文件不可用: ${envPath}`);
+      }
+    }
+
+    // 2. 尝试在系统 PATH 中查找
+    try {
+      const command = os.platform() === 'win32' ? 'where ffmpeg' : 'which ffmpeg';
+      const result = execSync(command, { encoding: 'utf8' }).trim();
+      const firstPath = result.split('\n')[0].trim();
+      if (firstPath) {
+        return firstPath;
+      }
+    } catch {
+      // 系统 PATH 中没有 ffmpeg
+    }
+
+    return null;
   }
 
   /**

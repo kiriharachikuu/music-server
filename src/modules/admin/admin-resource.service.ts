@@ -199,21 +199,42 @@ export class AdminResourceService {
 
   /** 获取歌词正文（管理端，不限发布状态，用于编辑器回显） */
   async getLyricContent(id: string): Promise<{ content: string }> {
+    // 先查 song 表
     const song = await this.prisma.song.findFirst({
       where: { id },
       select: { lyricContent: true, lyricUrl: true },
     });
-    if (!song) throw new NotFoundException('歌曲不存在');
-    // 优先返回 lyricContent；若为空则尝试读取 lyricUrl 文件
-    if (song.lyricContent) return { content: song.lyricContent };
-    return { content: await readLyricFile(song.lyricUrl) };
+    if (song) {
+      // 优先返回 lyricContent；若为空则尝试读取 lyricUrl 文件
+      if (song.lyricContent) return { content: song.lyricContent };
+      return { content: await readLyricFile(song.lyricUrl) };
+    }
+
+    // song 表没找到，查 liveClip 表
+    const clip = await this.prisma.liveClip.findFirst({
+      where: { id },
+      select: { lyricContent: true },
+    });
+    if (!clip) throw new NotFoundException('歌曲不存在');
+    return { content: clip.lyricContent ?? '' };
   }
 
   /** 设置歌词正文（在线编辑器保存） */
   async setLyricContent(id: string, content: string): Promise<{ saved: true }> {
+    // 先查 song 表
     const song = await this.prisma.song.findFirst({ where: { id } });
-    if (!song) throw new NotFoundException('歌曲不存在');
-    await this.prisma.song.update({
+    if (song) {
+      await this.prisma.song.update({
+        where: { id },
+        data: { lyricContent: content || null },
+      });
+      return { saved: true };
+    }
+
+    // song 表没找到，查 liveClip 表
+    const clip = await this.prisma.liveClip.findFirst({ where: { id } });
+    if (!clip) throw new NotFoundException('歌曲不存在');
+    await this.prisma.liveClip.update({
       where: { id },
       data: { lyricContent: content || null },
     });
@@ -222,9 +243,20 @@ export class AdminResourceService {
 
   /** 删除歌词正文（清空 lyricContent） */
   async deleteLyricContent(id: string): Promise<{ deleted: true }> {
+    // 先查 song 表
     const song = await this.prisma.song.findFirst({ where: { id } });
-    if (!song) throw new NotFoundException('歌曲不存在');
-    await this.prisma.song.update({
+    if (song) {
+      await this.prisma.song.update({
+        where: { id },
+        data: { lyricContent: null },
+      });
+      return { deleted: true };
+    }
+
+    // song 表没找到，查 liveClip 表
+    const clip = await this.prisma.liveClip.findFirst({ where: { id } });
+    if (!clip) throw new NotFoundException('歌曲不存在');
+    await this.prisma.liveClip.update({
       where: { id },
       data: { lyricContent: null },
     });
