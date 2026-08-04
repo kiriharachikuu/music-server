@@ -4,6 +4,7 @@ import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 import ffmpeg from 'fluent-ffmpeg';
+import ffmpegPath from 'ffmpeg-static';
 import ffprobePath from 'ffprobe-static';
 
 /** 音频元数据探测结果 */
@@ -72,7 +73,10 @@ export class AudioProcessService {
   private readonly logger = new Logger(AudioProcessService.name);
 
   constructor() {
-    // 指定 ffprobe 二进制路径，避免依赖系统 PATH
+    // 指定 ffmpeg 和 ffprobe 二进制路径，避免依赖系统 PATH
+    if (ffmpegPath) {
+      ffmpeg.setFfmpegPath(ffmpegPath);
+    }
     ffmpeg.setFfprobePath(ffprobePath.path);
   }
 
