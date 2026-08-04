@@ -68,7 +68,7 @@ export class LiveSessionService {
       id: clip.id,
       title: clip.title,
       artist: clip.artist,
-      cover: clip.coverUrl,
+      cover: clip.coverUrl ?? session.cover,
       url: clip.fileUrl,
       duration: clip.duration,
       trackType: 'live_clip' as const,
@@ -203,7 +203,7 @@ export class LiveSessionService {
       include: {
         clip: {
           include: {
-            session: { select: { id: true, title: true } },
+            session: { select: { id: true, title: true, cover: true } },
           },
         },
       },

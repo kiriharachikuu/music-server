@@ -225,7 +225,7 @@ export class SearchService {
           where,
           orderBy: [{ sessionId: 'asc' }, { trackIndex: 'asc' }],
           include: {
-            session: { select: { id: true, title: true, liveTime: true } },
+            session: { select: { id: true, title: true, liveTime: true, cover: true } },
           },
           skip: pagination.skip,
           take: pagination.take,
@@ -237,7 +237,7 @@ export class SearchService {
         id: clip.id,
         title: clip.title,
         artist: clip.artist,
-        cover: clip.coverUrl,
+        cover: clip.coverUrl ?? clip.session?.cover,
         url: clip.fileUrl,
         duration: clip.duration,
         trackType: 'live_clip' as const,
