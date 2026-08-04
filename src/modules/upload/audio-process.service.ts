@@ -5,7 +5,6 @@ import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 import ffmpeg from 'fluent-ffmpeg';
-import ffprobePath from 'ffprobe-static';
 
 /** 音频元数据探测结果 */
 export interface AudioMetadata {
@@ -73,43 +72,64 @@ export class AudioProcessService {
   private readonly logger = new Logger(AudioProcessService.name);
 
   constructor() {
-    // 自动检测 ffmpeg 路径：优先使用环境变量 FFMPEG_PATH，其次查找系统 PATH
-    const resolvedFfmpegPath = this.resolveFfmpegPath();
+    // 自动检测 ffmpeg 和 ffprobe 路径
+    const resolvedFfmpegPath = this.resolveBinaryPath('ffmpeg', process.env.FFMPEG_PATH);
+    const resolvedFfprobePath = this.resolveBinaryPath('ffprobe', process.env.FFPROBE_PATH);
+
     if (resolvedFfmpegPath) {
       ffmpeg.setFfmpegPath(resolvedFfmpegPath);
       this.logger.log(`使用 ffmpeg: ${resolvedFfmpegPath}`);
     } else {
-      this.logger.warn('未找到 ffmpeg，转码功能可能不可用');
+      this.logger.error('未找到 ffmpeg，转码功能不可用！请安装 ffmpeg (apt install ffmpeg)');
     }
-    ffmpeg.setFfprobePath(ffprobePath.path);
+
+    if (resolvedFfprobePath) {
+      ffmpeg.setFfprobePath(resolvedFfprobePath);
+      this.logger.log(`使用 ffprobe: ${resolvedFfprobePath}`);
+    } else {
+      this.logger.error('未找到 ffprobe，音频探测功能不可用！请安装 ffmpeg (apt install ffmpeg)');
+    }
+
+    // 验证 ffmpeg 是否支持 libmp3lame 编码器
+    if (resolvedFfmpegPath) {
+      try {
+        const encoders = execSync(`"${resolvedFfmpegPath}" -encoders`, { encoding: 'utf8' });
+        if (!encoders.includes('libmp3lame')) {
+          this.logger.error('ffmpeg 不支持 libmp3lame 编码器！请安装完整的 ffmpeg (apt install ffmpeg)');
+        } else {
+          this.logger.log('ffmpeg 已支持 libmp3lame 编码器');
+        }
+      } catch {
+        this.logger.warn('无法检测 ffmpeg 编码器支持情况');
+      }
+    }
   }
 
   /**
-   * 解析 ffmpeg 路径
-   * 优先使用环境变量 FFMPEG_PATH，其次尝试使用系统 PATH 中的 ffmpeg
+   * 解析二进制文件路径
+   * 优先使用环境变量，其次尝试使用系统 PATH
    */
-  private resolveFfmpegPath(): string | null {
+  private resolveBinaryPath(name: string, envPath?: string): string | null {
     // 1. 优先使用环境变量
-    const envPath = process.env.FFMPEG_PATH;
     if (envPath) {
       try {
         execSync(`"${envPath}" -version`, { stdio: 'ignore' });
         return envPath;
       } catch {
-        this.logger.warn(`环境变量 FFMPEG_PATH 指向的文件不可用: ${envPath}`);
+        this.logger.warn(`环境变量 ${name.toUpperCase()}_PATH 指向的文件不可用: ${envPath}`);
       }
     }
 
     // 2. 尝试在系统 PATH 中查找
     try {
-      const command = os.platform() === 'win32' ? 'where ffmpeg' : 'which ffmpeg';
+      const command = os.platform() === 'win32' ? `where ${name}` : `which ${name}`;
       const result = execSync(command, { encoding: 'utf8' }).trim();
       const firstPath = result.split('\n')[0].trim();
       if (firstPath) {
         return firstPath;
       }
     } catch {
-      // 系统 PATH 中没有 ffmpeg
+      // 系统 PATH 中没有找到
     }
 
     return null;
@@ -377,6 +397,7 @@ export class AudioProcessService {
   private runTranscodeWithBitrate(inputFile: string, outputFile: string, bitrate: string): Promise<void> {
     return new Promise((resolve, reject) => {
       let timeoutId: NodeJS.Timeout | null = null;
+      let stderrLog = '';
 
       const command = ffmpeg(inputFile)
         .output(outputFile)
@@ -384,9 +405,15 @@ export class AudioProcessService {
         .audioBitrate(bitrate)
         .format('mp3')
         .noVideo()
+        .on('stderr', (line: string) => {
+          // 收集 stderr 输出用于错误诊断
+          stderrLog += line + '\n';
+        })
         .on('error', (err: Error) => {
           if (timeoutId) clearTimeout(timeoutId);
-          reject(err);
+          // 附带 stderr 输出便于诊断
+          const detail = stderrLog.split('\n').filter(l => l.includes('Error') || l.includes('error') || l.includes('Invalid')).join('; ');
+          reject(new Error(`${err.message}${detail ? ` | ${detail}` : ''}`));
         })
         .on('end', () => {
           if (timeoutId) clearTimeout(timeoutId);
