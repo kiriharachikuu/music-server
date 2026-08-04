@@ -333,12 +333,25 @@ export class AudioProcessService {
     return result;
   }
 
-  /** 调用 ffprobe 解析指定文件路径 */
+  /** 调用 ffprobe 解析指定文件路径（带超时保护） */
   private ffprobeFile(
     file: string,
+    timeoutMs: number = 30000,
   ): Promise<ffmpeg.FfprobeData | undefined> {
     return new Promise((resolve, reject) => {
+      let resolved = false;
+
+      const timeoutId = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          reject(new Error(`ffprobe 超时（${timeoutMs}ms）：${path.basename(file)}`));
+        }
+      }, timeoutMs);
+
       ffmpeg(file).ffprobe((err, data) => {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(timeoutId);
         if (err) {
           reject(err);
           return;
@@ -363,15 +376,30 @@ export class AudioProcessService {
    */
   private runTranscodeWithBitrate(inputFile: string, outputFile: string, bitrate: string): Promise<void> {
     return new Promise((resolve, reject) => {
-      ffmpeg(inputFile)
+      let timeoutId: NodeJS.Timeout | null = null;
+
+      const command = ffmpeg(inputFile)
         .output(outputFile)
         .audioCodec('libmp3lame')
         .audioBitrate(bitrate)
         .format('mp3')
         .noVideo()
-        .on('error', (err: Error) => reject(err))
-        .on('end', () => resolve())
-        .run();
+        .on('error', (err: Error) => {
+          if (timeoutId) clearTimeout(timeoutId);
+          reject(err);
+        })
+        .on('end', () => {
+          if (timeoutId) clearTimeout(timeoutId);
+          resolve();
+        });
+
+      // 先设置事件监听，再执行
+      timeoutId = setTimeout(() => {
+        command.kill('SIGKILL');
+        reject(new Error(`转码超时（超过 10 分钟）：${path.basename(inputFile)} → ${bitrate}`));
+      }, 600000);
+
+      command.run();
     });
   }
 

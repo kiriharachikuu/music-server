@@ -31,6 +31,11 @@ export class S3StorageService implements StorageService {
         accessKeyId: config.get<string>('storage.secretId') || '',
         secretAccessKey: config.get<string>('storage.secretKey') || '',
       },
+      // 设置请求超时为 10 分钟
+      requestHandler: {
+        connectionTimeout: 600000,
+        requestTimeout: 600000,
+      },
     });
   }
 

@@ -19,6 +19,11 @@ export class CosStorageService implements StorageService {
       SecretId: config.get<string>('storage.secretId') || '',
       SecretKey: config.get<string>('storage.secretKey') || '',
       SecurityToken: config.get<string>('storage.sessionToken') || undefined,
+      // 设置请求超时为 5 分钟
+      Timeout: 300000,
+      // 设置上传/下载超时为 10 分钟
+      UploadTimeout: 600000,
+      DownloadTimeout: 600000,
     });
   }
 

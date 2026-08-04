@@ -139,9 +139,17 @@ export class TranscodingService {
       data: { status: 'PROCESSING' },
     });
 
-    await this.processJob(jobId);
+    // 修复：异步执行转码任务，避免 HTTP 请求超时
+    // processJob 会在后台运行，完成后自动更新任务状态
+    this.processJob(jobId).catch((err) => {
+      this.logger.error(`转码任务异常：${jobId} - ${err.message}`);
+      this.prisma.transcodingJob.update({
+        where: { id: jobId },
+        data: { status: 'FAILED', errorMessage: err.message },
+      }).catch(() => {});
+    });
 
-    return { started: true };
+    return { started: true, message: '转码任务已在后台启动' };
   }
 
   async retryJob(jobId: string) {
@@ -167,40 +175,63 @@ export class TranscodingService {
       data: { status: 'PENDING', errorMessage: null },
     });
 
-    await this.processJob(jobId);
+    // 修复：异步执行转码任务，避免 HTTP 请求超时
+    this.processJob(jobId).catch((err) => {
+      this.logger.error(`重试任务异常：${jobId} - ${err.message}`);
+      this.prisma.transcodingJob.update({
+        where: { id: jobId },
+        data: { status: 'FAILED', errorMessage: err.message },
+      }).catch(() => {});
+    });
 
-    return { retried: true };
+    return { retried: true, message: '重试任务已在后台启动' };
   }
 
   private async processJob(jobId: string) {
-    const pendingItems = await this.prisma.transcodingJobItem.findMany({
-      where: { jobId, status: 'PENDING' },
-      select: {
-        id: true,
-        songId: true,
-        songTitle: true,
-        songArtist: true,
-      },
-    });
-
-    const chunks = this.chunkArray(pendingItems, this.CONCURRENCY_LIMIT);
-
-    for (const chunk of chunks) {
-      const promises = chunk.map((item) => this.processSong(item, jobId));
-      await Promise.all(promises);
-
-      const progress = await this.prisma.transcodingJob.findUnique({
-        where: { id: jobId },
+    try {
+      const pendingItems = await this.prisma.transcodingJobItem.findMany({
+        where: { jobId, status: 'PENDING' },
+        select: {
+          id: true,
+          songId: true,
+          songTitle: true,
+          songArtist: true,
+        },
       });
 
-      // 修复A1：完成判定逻辑应计入failedSongs，否则有失败项时任务永久卡在PROCESSING
-      if (progress && progress.completedSongs + progress.failedSongs >= progress.totalSongs) {
+      const chunks = this.chunkArray(pendingItems, this.CONCURRENCY_LIMIT);
+
+      for (const chunk of chunks) {
+        const promises = chunk.map((item) => this.processSong(item, jobId));
+        await Promise.all(promises);
+
+        const progress = await this.prisma.transcodingJob.findUnique({
+          where: { id: jobId },
+        });
+
+        // 修复A1：完成判定逻辑应计入failedSongs，否则有失败项时任务永久卡在PROCESSING
+        if (progress && progress.completedSongs + progress.failedSongs >= progress.totalSongs) {
+          await this.prisma.transcodingJob.update({
+            where: { id: jobId },
+            data: { status: 'COMPLETED' },
+          });
+          this.logger.log(`转码任务完成：${jobId}`);
+          break;
+        }
+      }
+    } catch (err) {
+      this.logger.error(`转码任务异常：${jobId} - ${(err as Error).message}`);
+      try {
+        // 标记任务为失败
         await this.prisma.transcodingJob.update({
           where: { id: jobId },
-          data: { status: 'COMPLETED' },
+          data: {
+            status: 'FAILED',
+            errorMessage: (err as Error).message,
+          },
         });
-        this.logger.log(`转码任务完成：${jobId}`);
-        break;
+      } catch {
+        // 忽略状态更新错误
       }
     }
   }
