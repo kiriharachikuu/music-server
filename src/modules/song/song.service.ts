@@ -44,6 +44,10 @@ export class SongService {
           fileUrl: true,
           fileSize: true,
         },
+        orderBy: [
+          // 高音质优先：HIGH → MEDIUM → LOW
+          { quality: 'asc' },
+        ],
       });
 
       if (qualities.length === 0) {
@@ -58,7 +62,13 @@ export class SongService {
         ];
       }
 
-      return qualities.map((q) => ({
+      // 按音质从高到低排序：HIGH → MEDIUM → LOW
+      const qualityOrder: Record<string, number> = { HIGH: 0, MEDIUM: 1, LOW: 2 };
+      const sorted = [...qualities].sort(
+        (a, b) => (qualityOrder[a.quality] ?? 99) - (qualityOrder[b.quality] ?? 99),
+      );
+
+      return sorted.map((q) => ({
         level: q.quality.toLowerCase() as 'high' | 'medium' | 'low',
         quality: q.quality,
         bitrate: q.bitrate,
