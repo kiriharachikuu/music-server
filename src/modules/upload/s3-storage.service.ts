@@ -101,6 +101,14 @@ export class S3StorageService implements StorageService {
     return clean.replace(/^\/+/, '');
   }
 
+  async download(key: string): Promise<Buffer> {
+    const response = (await this.client.send(
+      new GetObjectCommand({ Bucket: this.bucket, Key: key }),
+    )) as any;
+    if (!response.Body) throw new Error('下载文件失败：空响应');
+    return Buffer.from(await response.Body.transformToByteArray());
+  }
+
   private currentYearMonth(): string {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;

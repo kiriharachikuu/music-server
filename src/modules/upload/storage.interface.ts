@@ -21,6 +21,8 @@ export interface StorageService {
   presign(path: string, expiresIn?: number): Promise<string>;
   /** 从完整 URL 反向提取存储内部 path（与 getUrl 互逆） */
   extractPath(url: string): string;
+  /** 直接从存储下载文件为 Buffer（不依赖公开访问权限） */
+  download(path: string): Promise<Buffer>;
 }
 
 /** StorageService 的 DI Token */

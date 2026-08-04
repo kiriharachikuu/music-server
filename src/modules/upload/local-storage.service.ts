@@ -108,6 +108,15 @@ export class LocalStorageService implements StorageService {
     return p.replace(/^\/+/, '');
   }
 
+  async download(relPath: string): Promise<Buffer> {
+    const abs = path.join(this.root, relPath);
+    const resolved = path.resolve(abs);
+    if (!resolved.startsWith(this.root)) {
+      throw new BadRequestException('非法的文件路径');
+    }
+    return fs.readFile(resolved);
+  }
+
   /**
    * 净化分类目录名，防止路径遍历
    */

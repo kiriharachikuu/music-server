@@ -104,6 +104,16 @@ export class CosStorageService implements StorageService {
     return clean.replace(/^\/+/, '');
   }
 
+  async download(key: string): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+      this.cos.getObject(
+        { Bucket: this.bucket, Region: this.region, Key: key },
+        (err: any, data: any) =>
+          err ? reject(err) : resolve(Buffer.from(data.Body)),
+      );
+    });
+  }
+
   private currentYearMonth(): string {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;

@@ -24,6 +24,7 @@ interface StorageClient {
   getUrl(key: string): string;
   presign(key: string, expiresIn?: number): Promise<string>;
   extractPath(url: string): string;
+  download(key: string): Promise<Buffer>;
 }
 
 @Injectable()
@@ -134,6 +135,15 @@ export class DynamicStorageService implements StorageService {
         if (p.startsWith(URL_PREFIX)) return p.slice(URL_PREFIX.length).replace(/^\/+/, '');
         return p.replace(/^\/+/, '');
       },
+
+      async download(relPath: string): Promise<Buffer> {
+        const abs = path.join(root, relPath);
+        const resolved = path.resolve(abs);
+        if (!resolved.startsWith(root)) {
+          throw new Error('非法的文件路径');
+        }
+        return fs.readFile(resolved);
+      },
     };
   }
 
@@ -209,6 +219,13 @@ export class DynamicStorageService implements StorageService {
           if (/^https?:\/\//i.test(clean)) return new URL(clean).pathname.replace(/^\/+/, '');
         } catch {}
         return clean.replace(/^\/+/, '');
+      },
+
+      async download(key: string): Promise<Buffer> {
+        const { GetObjectCommand } = require('@aws-sdk/client-s3');
+        const response = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key })) as any;
+        if (!response.Body) throw new Error('下载文件失败：空响应');
+        return Buffer.from(await response.Body.transformToByteArray());
       },
     };
   }
@@ -287,6 +304,14 @@ export class DynamicStorageService implements StorageService {
         } catch {}
         return clean.replace(/^\/+/, '');
       },
+
+      async download(key: string): Promise<Buffer> {
+        return new Promise((resolve, reject) => {
+          cos.getObject({ Bucket: bucket, Region: region, Key: key },
+            (err: any, data: any) => err ? reject(err) : resolve(Buffer.from(data.Body)),
+          );
+        });
+      },
     };
   }
 
@@ -322,5 +347,10 @@ export class DynamicStorageService implements StorageService {
     } catch { p = url.split('?')[0].split('#')[0]; }
     if (p.startsWith('/uploads')) return p.slice('/uploads'.length).replace(/^\/+/, '');
     return p.replace(/^\/+/, '');
+  }
+
+  async download(key: string): Promise<Buffer> {
+    const client = await this.getClient();
+    return client.download(key);
   }
 }

@@ -153,15 +153,12 @@ export class TranscodingService {
       throw new Error('转码任务不存在');
     }
 
-    const failedItems = await this.prisma.transcodingJobItem.findMany({
-      where: { jobId, status: 'FAILED' },
-    });
-
+    // 修复A2：只重置failedSongs，保持completedSongs不变，避免负值
     await this.prisma.transcodingJob.update({
       where: { id: jobId },
       data: {
         status: 'PROCESSING',
-        failedSongs: 0,
+        failedSongs: 0, // 只重置失败计数
       },
     });
 
@@ -196,6 +193,7 @@ export class TranscodingService {
         where: { id: jobId },
       });
 
+      // 修复A1：完成判定逻辑应计入failedSongs，否则有失败项时任务永久卡在PROCESSING
       if (progress && progress.completedSongs + progress.failedSongs >= progress.totalSongs) {
         await this.prisma.transcodingJob.update({
           where: { id: jobId },
@@ -301,12 +299,7 @@ export class TranscodingService {
   }
 
   private async downloadFile(path: string): Promise<Buffer> {
-    const url = this.storage.getUrl(path);
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`下载文件失败：${response.status}`);
-    }
-    return Buffer.from(await response.arrayBuffer());
+    return this.storage.download(path);
   }
 
   /** 为单首歌曲创建转码任务（异步执行，立即返回 jobId） */
