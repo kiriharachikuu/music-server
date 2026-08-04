@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Inject } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AudioProcessService } from '../upload/audio-process.service';
@@ -6,7 +6,7 @@ import { STORAGE_SERVICE } from '../upload/storage.interface';
 import type { StorageService } from '../upload/storage.interface';
 
 @Injectable()
-export class TranscodingService {
+export class TranscodingService implements OnModuleInit {
   private readonly logger = new Logger(TranscodingService.name);
   private readonly CONCURRENCY_LIMIT = 2;
 
@@ -15,6 +15,36 @@ export class TranscodingService {
     private readonly audioProcess: AudioProcessService,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
+
+  /**
+   * 模块初始化时恢复卡住的转码任务
+   * 服务重启后，PROCESSING 状态的任务无人处理，需要自动恢复
+   */
+  async onModuleInit() {
+    const stuckJobs = await this.prisma.transcodingJob.findMany({
+      where: { status: 'PROCESSING' },
+      select: { id: true },
+    });
+
+    if (stuckJobs.length === 0) return;
+
+    this.logger.log(`发现 ${stuckJobs.length} 个卡住的转码任务，开始恢复...`);
+
+    for (const job of stuckJobs) {
+      // 将 PROCESSING 状态的 job item 重置为 PENDING
+      await this.prisma.transcodingJobItem.updateMany({
+        where: { jobId: job.id, status: 'PROCESSING' },
+        data: { status: 'PENDING' },
+      });
+
+      // 异步重新处理
+      this.processJob(job.id).catch((err) => {
+        this.logger.error(`恢复任务异常：${job.id} - ${err.message}`);
+      });
+    }
+
+    this.logger.log('卡住的转码任务已恢复处理');
+  }
 
   async createJob(): Promise<{ jobId: string }> {
     // 查询已发布但尚未完成全部三种音质转码的歌曲
@@ -119,6 +149,36 @@ export class TranscodingService {
     });
 
     return { ...job, items };
+  }
+
+  /**
+   * 删除转码任务
+   * 不允许删除正在处理中的任务（PROCESSING），需先等待完成或失败
+   */
+  async deleteJob(jobId: string) {
+    const job = await this.prisma.transcodingJob.findUnique({
+      where: { id: jobId },
+      select: { status: true },
+    });
+
+    if (!job) {
+      throw new Error('转码任务不存在');
+    }
+
+    if (job.status === 'PROCESSING') {
+      throw new Error('任务正在处理中，无法删除');
+    }
+
+    // 先删除关联的 job items，再删除 job
+    await this.prisma.transcodingJobItem.deleteMany({
+      where: { jobId },
+    });
+    await this.prisma.transcodingJob.delete({
+      where: { id: jobId },
+    });
+
+    this.logger.log(`转码任务已删除：${jobId}`);
+    return { deleted: true };
   }
 
   async startJob(jobId: string) {

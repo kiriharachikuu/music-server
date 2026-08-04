@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { Controller, Delete, Get, Param, Post, UseGuards } from '@nestjs/common';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -37,5 +37,10 @@ export class AdminTranscodingController {
   @Post('jobs/:id/retry')
   async retryJob(@Param('id') id: string) {
     return this.transcodingService.retryJob(id);
+  }
+
+  @Delete('jobs/:id')
+  async deleteJob(@Param('id') id: string) {
+    return this.transcodingService.deleteJob(id);
   }
 }
