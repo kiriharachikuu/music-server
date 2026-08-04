@@ -78,11 +78,12 @@ export class AdminService {
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
     const startStr = sevenDaysAgo.toISOString();
 
+    // 使用 substr 截取 ISO 8601 字符串前10位作为日期，避免 strftime 对 'Z' 后缀的兼容性问题
     const raw = await this.prisma.$queryRaw`
-      SELECT strftime('%Y-%m-%d', "playTime") AS day, COUNT(*) as count
+      SELECT substr("playTime", 1, 10) AS day, COUNT(*) as count
       FROM "PlayHistory"
       WHERE "playTime" >= ${startStr}
-      GROUP BY day
+      GROUP BY substr("playTime", 1, 10)
       ORDER BY day ASC
     `;
     const rows = raw as Array<{ day: string; count: number }>;
