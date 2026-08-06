@@ -47,6 +47,8 @@ export class SearchService {
         albums: [],
         playlists: [],
         artists: [],
+        liveClips: buildPaginatedResult([], 0, 1, 20),
+        liveSessions: buildPaginatedResult([], 0, 1, 20),
       };
     }
 
@@ -79,7 +81,24 @@ export class SearchService {
 
     const pagination = parsePagination(query);
 
-    const [songTotal, songs, albums, playlists, dbArtists] = await Promise.all([
+    const liveClipWhere = {
+      status: 'PUBLISHED' as const,
+      OR: [
+        { title: { contains: q } },
+        { artist: { contains: q } },
+      ],
+    };
+
+    const liveSessionWhere = {
+      status: 'PUBLISHED' as const,
+      deletedAt: null,
+      OR: [
+        { title: { contains: q } },
+        { artist: { contains: q } },
+      ],
+    };
+
+    const [songTotal, songs, albums, playlists, dbArtists, liveClips, liveSessions] = await Promise.all([
       this.prisma.song.count({ where: songWhere }),
       this.prisma.song.findMany({
         where: songWhere,
@@ -120,6 +139,19 @@ export class SearchService {
         },
         take: 20,
         select: { id: true, name: true, avatar: true },
+      }),
+      this.prisma.liveClip.findMany({
+        where: liveClipWhere,
+        orderBy: [{ sessionId: 'asc' }, { trackIndex: 'asc' }],
+        include: {
+          session: { select: { id: true, title: true, liveTime: true, cover: true } },
+        },
+        take: 10,
+      }),
+      this.prisma.liveSession.findMany({
+        where: liveSessionWhere,
+        orderBy: { liveTime: 'desc' },
+        take: 10,
       }),
     ]);
 
@@ -176,6 +208,21 @@ export class SearchService {
         .slice(0, 20);
     }
 
+    // 映射 liveClips → LiveClipTrack 格式（与 searchByCategory 一致）
+    const mappedLiveClips = liveClips.map((clip) => ({
+      id: clip.id,
+      title: clip.title,
+      artist: clip.artist,
+      cover: clip.coverUrl ?? clip.session?.cover,
+      url: clip.fileUrl,
+      duration: clip.duration,
+      trackType: 'live_clip' as const,
+      sessionId: clip.sessionId,
+      sessionName: clip.session?.title ?? '',
+      liveTime: clip.session?.liveTime?.toISOString() ?? '',
+      trackIndex: clip.trackIndex,
+    }));
+
     return {
       songs: buildPaginatedResult(
         mappedSongs,
@@ -186,8 +233,8 @@ export class SearchService {
       albums,
       playlists,
       artists,
-      liveClips: buildPaginatedResult([], 0, 1, 20),
-      liveSessions: [],
+      liveClips: buildPaginatedResult(mappedLiveClips, mappedLiveClips.length, 1, mappedLiveClips.length || 20),
+      liveSessions: buildPaginatedResult(liveSessions, liveSessions.length, 1, liveSessions.length || 20),
     };
   }
 

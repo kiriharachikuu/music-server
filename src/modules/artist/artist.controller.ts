@@ -18,6 +18,29 @@ export class ArtistController {
     });
   }
 
+  /** GET /api/artists/:id/songs 歌手单曲列表（分页 + 排序） */
+  @Get(':id/songs')
+  getSongs(
+    @Param('id') id: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('pageSize') pageSize?: string,
+    @Query('sort') sort?: string,
+  ) {
+    return this.artistService.getSongs(id, { page, limit, pageSize, sort });
+  }
+
+  /** GET /api/artists/:id/clips 歌手歌切列表（分页） */
+  @Get(':id/clips')
+  getClips(
+    @Param('id') id: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    return this.artistService.getClips(id, { page, limit, pageSize });
+  }
+
   @Get(':id')
   getDetail(@Param('id') id: string) {
     return this.artistService.getDetail(id);
