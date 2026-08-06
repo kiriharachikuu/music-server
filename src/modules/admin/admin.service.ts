@@ -7,6 +7,8 @@ export interface AdminStats {
   totalUsers: number;
   totalSongs: number;
   totalPlaylists: number;
+  totalLiveClips: number;
+  totalLiveSessions: number;
   todayPlays: number;
   playTrend: { date: string; plays: number }[];
   topSongs: {
@@ -15,6 +17,13 @@ export interface AdminStats {
     artist: string;
     coverUrl: string | null;
     plays: number;
+  }[];
+  topClips: {
+    id: string;
+    title: string;
+    artist: string;
+    coverUrl: string | null;
+    favoriteCount: number;
   }[];
 }
 
@@ -34,13 +43,20 @@ export class AdminService {
       totalUsers,
       totalSongs,
       totalPlaylists,
+      totalLiveClips,
+      totalLiveSessions,
       todayPlays,
       topSongsRaw,
+      topClipsRaw,
       trendRows,
     ] = await Promise.all([
       this.prisma.user.count({ where: { deletedAt: null } }),
       this.prisma.song.count({ where: { deletedAt: null } }),
       this.prisma.playlist.count({ where: { deletedAt: null } }),
+      this.prisma.liveClip.count({ where: { status: 'PUBLISHED' } }),
+      this.prisma.liveSession.count({
+        where: { deletedAt: null, status: 'PUBLISHED' },
+      }),
       this.prisma.playHistory.count({
         where: { playTime: { gte: startOfToday } },
       }),
@@ -56,6 +72,19 @@ export class AdminService {
           plays: true,
         },
       }),
+      // 热门歌切：按收藏数排序（LiveClip 无 plays 字段，用收藏数代理热度）
+      this.prisma.liveClip.findMany({
+        where: { status: 'PUBLISHED' },
+        orderBy: { favorites: { _count: 'desc' } },
+        take: 10,
+        select: {
+          id: true,
+          title: true,
+          artist: true,
+          coverUrl: true,
+          _count: { select: { favorites: true } },
+        },
+      }),
       this.fetchWeeklyTrend(),
     ]);
 
@@ -63,39 +92,62 @@ export class AdminService {
       totalUsers,
       totalSongs,
       totalPlaylists,
+      totalLiveClips,
+      totalLiveSessions,
       todayPlays,
       playTrend: trendRows,
       topSongs: topSongsRaw,
+      topClips: topClipsRaw.map((c) => ({
+        id: c.id,
+        title: c.title,
+        artist: c.artist,
+        coverUrl: c.coverUrl,
+        favoriteCount: c._count.favorites,
+      })),
     };
   }
 
-  /** 最近 7 天每日播放数（补齐缺失日期为 0） */
+  /**
+   * 最近 7 天每日播放数（按本地时区聚合，补齐缺失日期为 0）
+   * 用 Prisma findMany 拉取 playTime 在 JS 里按本地日期聚合，
+   * 彻底避免 SQLite datetime()/substr() 时区函数的兼容性问题
+   */
   private async fetchWeeklyTrend(): Promise<
     { date: string; plays: number }[]
   > {
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setHours(0, 0, 0, 0);
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
-    const startStr = sevenDaysAgo.toISOString();
 
-    // 使用 substr 截取 ISO 8601 字符串前10位作为日期，避免 strftime 对 'Z' 后缀的兼容性问题
-    const raw = await this.prisma.$queryRaw`
-      SELECT substr("playTime", 1, 10) AS day, COUNT(*) as count
-      FROM "PlayHistory"
-      WHERE "playTime" >= ${startStr}
-      GROUP BY substr("playTime", 1, 10)
-      ORDER BY day ASC
-    `;
-    const rows = raw as Array<{ day: string; count: number }>;
+    // 只拉取 playTime 字段，7 天数据量可控
+    const records = await this.prisma.playHistory.findMany({
+      where: { playTime: { gte: sevenDaysAgo } },
+      select: { playTime: true },
+    });
 
+    // 本地日期格式化（YYYY-MM-DD）
+    const formatLocalDate = (d: Date): string => {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    };
+
+    // 按本地日期聚合
+    const map = new Map<string, number>();
+    for (const r of records) {
+      const key = formatLocalDate(r.playTime);
+      map.set(key, (map.get(key) ?? 0) + 1);
+    }
+
+    // 补齐 7 天日期（从 6 天前到今天）
     const trend: { date: string; plays: number }[] = [];
     for (let i = 6; i >= 0; i--) {
       const d = new Date();
       d.setHours(0, 0, 0, 0);
       d.setDate(d.getDate() - i);
-      const key = d.toISOString().slice(0, 10);
-      const matched = rows.find((r) => r.day === key);
-      trend.push({ date: key, plays: matched?.count ?? 0 });
+      const key = formatLocalDate(d);
+      trend.push({ date: key, plays: map.get(key) ?? 0 });
     }
     return trend;
   }
