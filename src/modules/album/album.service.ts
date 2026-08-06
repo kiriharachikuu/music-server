@@ -15,15 +15,18 @@ export class AlbumService {
     page?: string;
     limit?: string;
     pageSize?: string;
+    sort?: string;
   }): Promise<PaginatedResult<unknown>> {
     const { page, limit, skip, take } = parsePagination(query);
     const where = { deletedAt: null };
+    const sort = query.sort ?? 'latest';
+    const orderBy = { releaseDate: sort === 'oldest' ? 'asc' as const : 'desc' as const };
     const [list, total] = await this.prisma.$transaction([
       this.prisma.album.findMany({
         where,
         skip,
         take,
-        orderBy: { releaseDate: 'desc' },
+        orderBy,
       }),
       this.prisma.album.count({ where }),
     ]);

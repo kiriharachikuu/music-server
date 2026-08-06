@@ -15,8 +15,9 @@ export class PlaylistController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('pageSize') pageSize?: string,
+    @Query('sort') sort?: string,
   ) {
-    return this.playlistService.list({ page, limit, pageSize });
+    return this.playlistService.list({ page, limit, pageSize, sort });
   }
 
   /** GET /api/playlists/:id 歌单详情 */

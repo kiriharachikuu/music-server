@@ -15,9 +15,12 @@ export class PlaylistService {
     page?: string;
     limit?: string;
     pageSize?: string;
+    sort?: string;
   }): Promise<PaginatedResult<unknown>> {
     const { page, limit, skip, take } = parsePagination(query);
     const where = { isPublic: true, deletedAt: null };
+    const sort = query.sort ?? 'latest';
+    const createdAtOrder = sort === 'oldest' ? 'asc' as const : 'desc' as const;
     const [list, total] = await this.prisma.$transaction([
       this.prisma.playlist.findMany({
         where,
@@ -25,7 +28,7 @@ export class PlaylistService {
         take,
         orderBy: [
           { isSystem: 'desc' },
-          { createdAt: 'desc' },
+          { createdAt: createdAtOrder },
         ],
         include: { user: { select: { id: true, username: true, avatar: true } } },
       }),

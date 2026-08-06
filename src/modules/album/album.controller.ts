@@ -15,8 +15,9 @@ export class AlbumController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('pageSize') pageSize?: string,
+    @Query('sort') sort?: string,
   ) {
-    return this.albumService.list({ page, limit, pageSize });
+    return this.albumService.list({ page, limit, pageSize, sort });
   }
 
   /** GET /api/albums/:id 专辑详情 */
