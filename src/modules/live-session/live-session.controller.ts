@@ -20,6 +20,16 @@ export class LiveSessionController {
     return this.liveSessionService.list({ page, limit, pageSize });
   }
 
+  /** GET /api/live-sessions/clips 歌切单曲列表 */
+  @Get('clips')
+  listClips(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    return this.liveSessionService.listClips({ page, limit, pageSize });
+  }
+
   /** GET /api/live-sessions/:id */
   @Get(':id')
   getOne(@Param('id') id: string) {

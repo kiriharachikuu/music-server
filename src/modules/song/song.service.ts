@@ -1,11 +1,53 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { readLyricFile } from '../admin/admin-resource.helpers';
+import {
+  buildPaginatedResult,
+  parsePagination,
+} from '../../common/utils/pagination.util';
 
 @Injectable()
 export class SongService {
   private readonly logger = new Logger(SongService.name);
   constructor(private readonly prisma: PrismaService) {}
+
+  /**
+   * 公开单曲列表（分页 + 排序）
+   * - 仅返回 status=PUBLISHED 且 deletedAt=null 的单曲
+   * - 排序：latest=releaseDate desc, hottest=plays desc, name=title asc
+   * - include album 关联
+   */
+  async list(query: {
+    page?: string;
+    limit?: string;
+    pageSize?: string;
+    sort?: string;
+  }) {
+    const { page, limit, skip, take } = parsePagination(query);
+    const sort = query.sort ?? 'latest';
+
+    const orderBy =
+      sort === 'hottest'
+        ? { plays: 'desc' as const }
+        : sort === 'name'
+          ? { title: 'asc' as const }
+          : { releaseDate: 'desc' as const };
+
+    const where = { deletedAt: null, status: 'PUBLISHED' as const };
+
+    const [list, total] = await this.prisma.$transaction([
+      this.prisma.song.findMany({
+        where,
+        orderBy,
+        skip,
+        take,
+        include: { album: true },
+      }),
+      this.prisma.song.count({ where }),
+    ]);
+
+    return buildPaginatedResult(list, total, page, limit);
+  }
 
   /** 歌曲详情：包含专辑与标签 */
   async getDetail(id: string) {

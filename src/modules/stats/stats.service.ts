@@ -28,59 +28,75 @@ export class StatsService {
   /**
    * 发现页聚合数据
    * - banners：首页轮播图（含关联歌曲，供点击播放）
-   * - dailyRecommend：从最新 50 首歌曲中随机抽取 30 首
+   * - dailySongs：从最新 50 首歌曲中随机抽取 20 首
+   * - dailyClips：从最新 50 条歌切中随机抽取 20 首（LiveClipTrack 格式）
    * - newSongs：按 releaseDate 降序 10 首
    * - featuredPlaylists：官方歌单（isSystem=true）优先，再按 playCount 降序 6 个
    */
   async getDiscover() {
-    const [banners, dailyRecommendPool, newSongs, featuredPlaylists, hotArtists] =
-      await Promise.all([
-        this.prisma.banner.findMany({
-          where: { status: 'VISIBLE' },
-          orderBy: { sort: 'asc' },
-          take: 8,
-          include: {
-            song: { include: { album: true } },
+    const [
+      banners,
+      dailySongsPool,
+      dailyClipsPool,
+      newSongs,
+      featuredPlaylists,
+      hotArtists,
+    ] = await Promise.all([
+      this.prisma.banner.findMany({
+        where: { status: 'VISIBLE' },
+        orderBy: { sort: 'asc' },
+        take: 8,
+        include: {
+          song: { include: { album: true } },
+        },
+      }),
+      this.prisma.song.findMany({
+        where: { deletedAt: null, status: 'PUBLISHED' },
+        orderBy: { releaseDate: 'desc' },
+        take: 50,
+        include: { album: true },
+      }),
+      this.prisma.liveClip.findMany({
+        where: { status: 'PUBLISHED' },
+        include: {
+          session: { select: { id: true, title: true, liveTime: true, cover: true } },
+        },
+        orderBy: [{ sessionId: 'asc' }, { trackIndex: 'asc' }],
+        take: 50,
+      }),
+      this.prisma.song.findMany({
+        where: { deletedAt: null, status: 'PUBLISHED' },
+        orderBy: { releaseDate: 'desc' },
+        take: 10,
+        include: { album: true },
+      }),
+      this.prisma.playlist.findMany({
+        where: { isPublic: true, deletedAt: null },
+        orderBy: [
+          { isSystem: 'desc' },
+          { playCount: 'desc' },
+        ],
+        take: 6,
+        include: {
+          user: { select: { id: true, username: true, avatar: true } },
+        },
+      }),
+      this.prisma.artist.findMany({
+        where: { deletedAt: null },
+        orderBy: { createdAt: 'desc' },
+        take: 12,
+        include: {
+          _count: {
+            select: { songArtists: { where: { song: { deletedAt: null, status: 'PUBLISHED' } } } },
           },
-        }),
-        this.prisma.song.findMany({
-          where: { deletedAt: null, status: 'PUBLISHED' },
-          orderBy: { releaseDate: 'desc' },
-          take: 50,
-          include: { album: true },
-        }),
-        this.prisma.song.findMany({
-          where: { deletedAt: null, status: 'PUBLISHED' },
-          orderBy: { releaseDate: 'desc' },
-          take: 10,
-          include: { album: true },
-        }),
-        this.prisma.playlist.findMany({
-          where: { isPublic: true, deletedAt: null },
-          orderBy: [
-            { isSystem: 'desc' },
-            { playCount: 'desc' },
-          ],
-          take: 6,
-          include: {
-            user: { select: { id: true, username: true, avatar: true } },
-          },
-        }),
-        this.prisma.artist.findMany({
-          where: { deletedAt: null },
-          orderBy: { createdAt: 'desc' },
-          take: 12,
-          include: {
-            _count: {
-              select: { songArtists: { where: { song: { deletedAt: null, status: 'PUBLISHED' } } } },
-            },
-          },
-        }),
-      ]);
+        },
+      }),
+    ]);
 
     return {
       banners,
-      dailyRecommend: this.shuffle(dailyRecommendPool).slice(0, 30),
+      dailySongs: this.shuffle(dailySongsPool).slice(0, 20),
+      dailyClips: this.shuffle(this.mapClipsToLiveClipTrack(dailyClipsPool)).slice(0, 20),
       newSongs,
       featuredPlaylists,
       hotArtists: hotArtists.map((a) => ({
@@ -91,6 +107,54 @@ export class StatsService {
         songCount: a._count.songArtists,
       })),
     };
+  }
+
+  /**
+   * 每日推荐·单曲：随机 limit 首 ApiSong（含 album 关联）
+   */
+  async getDailySongs(limit = 20): Promise<any[]> {
+    const pool = await this.prisma.song.findMany({
+      where: { deletedAt: null, status: 'PUBLISHED' },
+      orderBy: { releaseDate: 'desc' },
+      take: 50,
+      include: { album: true },
+    });
+    return this.shuffle(pool).slice(0, limit);
+  }
+
+  /**
+   * 每日推荐·歌切：随机 limit 首 LiveClipTrack
+   */
+  async getDailyClips(limit = 20): Promise<any[]> {
+    const pool = await this.prisma.liveClip.findMany({
+      where: { status: 'PUBLISHED' },
+      include: {
+        session: { select: { id: true, title: true, liveTime: true, cover: true } },
+      },
+      orderBy: [{ sessionId: 'asc' }, { trackIndex: 'asc' }],
+      take: 50,
+    });
+    return this.shuffle(this.mapClipsToLiveClipTrack(pool)).slice(0, limit);
+  }
+
+  /**
+   * 将 liveClip 记录映射为前端 LiveClipTrack 格式
+   * 扁平化 session 字段 + 添加 trackType（与 search.service.ts 保持一致）
+   */
+  private mapClipsToLiveClipTrack(clips: any[]): any[] {
+    return clips.map((clip) => ({
+      id: clip.id,
+      title: clip.title,
+      artist: clip.artist,
+      cover: clip.coverUrl ?? clip.session?.cover,
+      url: clip.fileUrl,
+      duration: clip.duration,
+      trackType: 'live_clip' as const,
+      sessionId: clip.sessionId,
+      sessionName: clip.session?.title ?? '',
+      liveTime: clip.session?.liveTime?.toISOString() ?? '',
+      trackIndex: clip.trackIndex,
+    }));
   }
 
   /**

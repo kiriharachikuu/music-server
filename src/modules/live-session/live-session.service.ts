@@ -30,6 +30,47 @@ export class LiveSessionService {
     return buildPaginatedResult(list, total, page, limit);
   }
 
+  /**
+   * 公开：已发布歌切列表（分页）
+   * - 查 liveClip 表 status=PUBLISHED
+   * - 按 sessionId asc, trackIndex asc 排序
+   * - include session（id/title/liveTime/cover）
+   * - 映射为 LiveClipTrack 格式（与 searchByCategory 一致）
+   */
+  async listClips(query: { page?: string; limit?: string; pageSize?: string }) {
+    const { page, limit, skip, take } = parsePagination(query);
+    const where: Prisma.LiveClipWhereInput = { status: 'PUBLISHED' };
+
+    const [list, total] = await this.prisma.$transaction([
+      this.prisma.liveClip.findMany({
+        where,
+        orderBy: [{ sessionId: 'asc' }, { trackIndex: 'asc' }],
+        include: {
+          session: { select: { id: true, title: true, liveTime: true, cover: true } },
+        },
+        skip,
+        take,
+      }),
+      this.prisma.liveClip.count({ where }),
+    ]);
+
+    const mapped = list.map((clip) => ({
+      id: clip.id,
+      title: clip.title,
+      artist: clip.artist,
+      cover: clip.coverUrl ?? clip.session?.cover,
+      url: clip.fileUrl,
+      duration: clip.duration,
+      trackType: 'live_clip' as const,
+      sessionId: clip.sessionId,
+      sessionName: clip.session?.title ?? '',
+      liveTime: clip.session?.liveTime?.toISOString() ?? '',
+      trackIndex: clip.trackIndex,
+    }));
+
+    return buildPaginatedResult(mapped, total, page, limit);
+  }
+
   /** 公开：根据 sessionId 获取该场次 + 全部已发布歌切（按 trackIndex 升序） */
   async findOne(id: string) {
     const session = await this.prisma.liveSession.findFirst({

@@ -1,4 +1,4 @@
-import { Controller, Get, Param } from '@nestjs/common';
+import { Controller, Get, Param, Query } from '@nestjs/common';
 import { SongService } from './song.service';
 
 /**
@@ -8,6 +8,17 @@ import { SongService } from './song.service';
 @Controller('songs')
 export class SongController {
   constructor(private readonly songService: SongService) {}
+
+  /** GET /api/songs 公开单曲列表（分页 + 排序） */
+  @Get()
+  list(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('pageSize') pageSize?: string,
+    @Query('sort') sort?: string,
+  ) {
+    return this.songService.list({ page, limit, pageSize, sort });
+  }
 
   /** GET /api/songs/:id 歌曲详情 */
   @Get(':id')
