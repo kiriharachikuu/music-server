@@ -14,7 +14,7 @@ export class SongService {
   /**
    * 公开单曲列表（分页 + 排序）
    * - 仅返回 status=PUBLISHED 且 deletedAt=null 的单曲
-   * - 排序：latest=releaseDate desc, hottest=plays desc, name=title asc
+   * - 排序：latest=releaseDate desc, oldest=releaseDate asc, hottest=plays desc, name=title asc
    * - include album 关联
    */
   async list(query: {
@@ -31,7 +31,9 @@ export class SongService {
         ? { plays: 'desc' as const }
         : sort === 'name'
           ? { title: 'asc' as const }
-          : { releaseDate: 'desc' as const };
+          : sort === 'oldest'
+            ? { releaseDate: 'asc' as const }
+            : { releaseDate: 'desc' as const };
 
     const where = { deletedAt: null, status: 'PUBLISHED' as const };
 

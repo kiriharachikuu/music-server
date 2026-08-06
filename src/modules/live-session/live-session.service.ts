@@ -11,17 +11,19 @@ import type { Prisma } from '@prisma/client';
 export class LiveSessionService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** 公开：获取已发布场次列表（分页） */
-  async list(query: { page?: string; limit?: string; pageSize?: string }) {
+  /** 公开：获取已发布场次列表（分页，按直播时间排序） */
+  async list(query: { page?: string; limit?: string; pageSize?: string; sort?: string }) {
     const { page, limit, skip, take } = parsePagination(query);
     const where: Prisma.LiveSessionWhereInput = {
       status: 'PUBLISHED',
       deletedAt: null,
     };
+    const sort = query.sort ?? 'latest';
+    const orderBy = { liveTime: sort === 'oldest' ? 'asc' as const : 'desc' as const };
     const [list, total] = await this.prisma.$transaction([
       this.prisma.liveSession.findMany({
         where,
-        orderBy: { liveTime: 'desc' },
+        orderBy,
         skip,
         take,
       }),
@@ -31,20 +33,24 @@ export class LiveSessionService {
   }
 
   /**
-   * 公开：已发布歌切列表（分页）
+   * 公开：已发布歌切列表（分页，按场次直播时间排序）
    * - 查 liveClip 表 status=PUBLISHED
-   * - 按 sessionId asc, trackIndex asc 排序
    * - include session（id/title/liveTime/cover）
    * - 映射为 LiveClipTrack 格式（与 searchByCategory 一致）
    */
-  async listClips(query: { page?: string; limit?: string; pageSize?: string }) {
+  async listClips(query: { page?: string; limit?: string; pageSize?: string; sort?: string }) {
     const { page, limit, skip, take } = parsePagination(query);
     const where: Prisma.LiveClipWhereInput = { status: 'PUBLISHED' };
+    const sort = query.sort ?? 'latest';
+    const liveTimeOrder = sort === 'oldest' ? 'asc' as const : 'desc' as const;
 
     const [list, total] = await this.prisma.$transaction([
       this.prisma.liveClip.findMany({
         where,
-        orderBy: [{ sessionId: 'asc' }, { trackIndex: 'asc' }],
+        orderBy: [
+          { session: { liveTime: liveTimeOrder } },
+          { trackIndex: 'asc' },
+        ],
         include: {
           session: { select: { id: true, title: true, liveTime: true, cover: true } },
         },

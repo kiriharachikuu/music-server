@@ -14,7 +14,7 @@ export class ArtistController {
     return this.artistService.getList({
       page: page ? parseInt(page, 10) : 1,
       limit: limit ? parseInt(limit, 10) : 12,
-      sort: (sort as 'latest' | 'hottest' | 'name') || 'latest',
+      sort: (sort as 'latest' | 'oldest' | 'name') || 'latest',
     });
   }
 

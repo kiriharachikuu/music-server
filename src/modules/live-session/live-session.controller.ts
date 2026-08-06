@@ -10,24 +10,26 @@ import { LiveSessionService } from './live-session.service';
 export class LiveSessionController {
   constructor(private readonly liveSessionService: LiveSessionService) {}
 
-  /** GET /api/live-sessions?page=&limit= */
+  /** GET /api/live-sessions?page=&limit=&sort=latest|oldest */
   @Get()
   list(
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('pageSize') pageSize?: string,
+    @Query('sort') sort?: string,
   ) {
-    return this.liveSessionService.list({ page, limit, pageSize });
+    return this.liveSessionService.list({ page, limit, pageSize, sort });
   }
 
-  /** GET /api/live-sessions/clips 歌切单曲列表 */
+  /** GET /api/live-sessions/clips?sort=latest|oldest 歌切单曲列表 */
   @Get('clips')
   listClips(
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('pageSize') pageSize?: string,
+    @Query('sort') sort?: string,
   ) {
-    return this.liveSessionService.listClips({ page, limit, pageSize });
+    return this.liveSessionService.listClips({ page, limit, pageSize, sort });
   }
 
   /** GET /api/live-sessions/:id */
