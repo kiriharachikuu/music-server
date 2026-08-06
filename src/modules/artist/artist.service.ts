@@ -8,7 +8,7 @@ import {
 interface ListParams {
   page: number;
   limit: number;
-  sort: 'latest' | 'hottest' | 'name';
+  sort: 'latest' | 'oldest' | 'name';
 }
 
 @Injectable()
@@ -20,7 +20,9 @@ export class ArtistService {
     const orderBy =
       sort === 'name'
         ? { name: 'asc' as const }
-        : { createdAt: 'desc' as const };
+        : sort === 'oldest'
+          ? { createdAt: 'asc' as const }
+          : { createdAt: 'desc' as const };
 
     const [total, list] = await Promise.all([
       this.prisma.artist.count({ where }),
