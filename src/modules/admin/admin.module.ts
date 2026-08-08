@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AdminAlbumController } from './admin-album.controller';
 import { AdminArtistController } from './admin-artist.controller';
+import { AdminArtistMergeController } from './admin-artist-merge.controller';
 import { AdminBannerController } from './admin-banner.controller';
 import { AdminMigrationController } from './admin-migration.controller';
 import { AdminPlaylistController } from './admin-playlist.controller';
@@ -12,6 +13,7 @@ import { AdminUserController } from './admin-user.controller';
 import { AdminController } from './admin.controller';
 import { AdminTranscodingController } from './admin-transcoding.controller';
 import { AdminResourceService } from './admin-resource.service';
+import { ArtistMergeService } from './artist-merge.service';
 import { AdminService } from './admin.service';
 import { MigrationService } from './migration.service';
 import { TranscodingService } from './transcoding.service';
@@ -34,6 +36,7 @@ import { LiveSessionModule } from '../live-session/live-session.module';
     AdminTagController,
     AdminAlbumController,
     AdminArtistController,
+    AdminArtistMergeController,
     AdminPlaylistController,
     AdminBannerController,
     AdminUserController,
@@ -44,6 +47,6 @@ import { LiveSessionModule } from '../live-session/live-session.module';
     AdminLiveClipController,
     AdminTranscodingController,
   ],
-  providers: [AdminService, AdminResourceService, MigrationService, TranscodingService],
+  providers: [AdminService, AdminResourceService, ArtistMergeService, MigrationService, TranscodingService],
 })
 export class AdminModule {}

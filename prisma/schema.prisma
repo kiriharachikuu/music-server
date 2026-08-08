@@ -388,6 +388,7 @@ model Artist {
 
   songArtists  SongArtist[]
   albumArtists AlbumArtist[]
+  aliases      ArtistAlias[]
 
   @@index([name])
   @@index([deletedAt])
@@ -593,4 +594,46 @@ model TranscodingJobItem {
 
   @@index([jobId])
   @@index([status])
+}
+
+// 歌手别名映射表
+// 把同一歌手的不同文件名写法（如 lulu / LULU / るる）映射到规范 Artist，
+// 用途：① 合并时登记变体；② 上传歌切/场次时按别名把 artist 字符串归一到规范名，防止再次拆分
+model ArtistAlias {
+  id         String   @id @default(cuid())
+  // 变体原始写法（区分大小写存原样，匹配时做归一化）
+  alias      String   @unique
+  // 归一化 key（大小写折叠 + NFKC），便于快速命中
+  normalized String
+  artistId   String
+  artist     Artist   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  // 规范显示名冗余一份，避免每次 join（与 artist.name 同步）
+  canonical  String
+  source     String   @default("manual") // manual | merge | auto
+  createdAt  DateTime @default(now())
+
+  @@index([artistId])
+  @@index([normalized])
+  @@index([canonical])
+}
+
+// 歌手合并操作日志（可查 + 可撤销）
+// changes 存被改动行的旧值快照（JSON），revert 时按快照回滚
+model ArtistMergeLog {
+  id                String    @id @default(cuid())
+  canonicalName     String
+  canonicalArtistId String?
+  // 被并入的变体名列表（JSON string[]）
+  aliases           String
+  // 回滚快照（JSON）：{ clips:[{id,old}], sessions:[...], albums:[...], songs:[...], softDeletedArtistIds:[...], aliasIds:[...] }
+  changes           String
+  operatorId        String?
+  operatorName      String?
+  clipCount         Int       @default(0)
+  songCount         Int       @default(0)
+  createdAt         DateTime  @default(now())
+  revertedAt        DateTime?
+
+  @@index([canonicalArtistId])
+  @@index([createdAt])
 }

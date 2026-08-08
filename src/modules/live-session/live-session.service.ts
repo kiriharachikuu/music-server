@@ -5,11 +5,45 @@ import {
   parsePagination,
 } from '../../common/utils/pagination.util';
 import { buildKeywordWhere } from '../admin/admin-resource.helpers';
+import {
+  ARTIST_JOIN,
+  normalizeArtistName,
+  splitArtists,
+} from '../../common/utils/artist-normalize.util';
 import type { Prisma } from '@prisma/client';
 
 @Injectable()
 export class LiveSessionService {
   constructor(private readonly prisma: PrismaService) {}
+
+  /**
+   * 按别名表把 artist 字符串归一到规范名（防止同一歌手被文件名不同写法再次拆分）。
+   * 逐段查 ArtistAlias.normalized，命中则替换为规范名；无命中原样返回。
+   */
+  private async normalizeArtistField(
+    raw?: string | null,
+  ): Promise<string | undefined> {
+    if (raw == null) return undefined;
+    const tokens = splitArtists(raw);
+    if (!tokens.length) return raw;
+    const norms = [...new Set(tokens.map(normalizeArtistName))];
+    const hits = await this.prisma.artistAlias.findMany({
+      where: { normalized: { in: norms } },
+      select: { normalized: true, canonical: true },
+    });
+    if (!hits.length) return raw;
+    const map = new Map(hits.map((h) => [h.normalized, h.canonical]));
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const t of tokens) {
+      const canon = map.get(normalizeArtistName(t)) ?? t;
+      const k = normalizeArtistName(canon);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(canon);
+    }
+    return out.join(ARTIST_JOIN);
+  }
 
   /** 公开：获取已发布场次列表（分页，按直播时间排序） */
   async list(query: { page?: string; limit?: string; pageSize?: string; sort?: string }) {
@@ -303,11 +337,15 @@ export class LiveSessionService {
 
   /** Admin：新增场次 */
   async adminCreate(dto: any) {
+    if (dto?.artist !== undefined)
+      dto.artist = await this.normalizeArtistField(dto.artist);
     return this.prisma.liveSession.create({ data: dto });
   }
 
   /** Admin：编辑场次 */
   async adminUpdate(id: string, dto: any) {
+    if (dto?.artist !== undefined)
+      dto.artist = await this.normalizeArtistField(dto.artist);
     await this.prisma.liveSession.update({ where: { id }, data: dto });
     return this.adminFindOne(id);
   }
@@ -405,6 +443,8 @@ export class LiveSessionService {
 
   /** Admin：新增歌切 + 同步更新场次 songCount */
   async adminClipCreate(dto: any) {
+    if (dto?.artist !== undefined)
+      dto.artist = await this.normalizeArtistField(dto.artist);
     const clip = await this.prisma.$transaction(async (tx) => {
       const created = await tx.liveClip.create({ data: dto });
       await tx.liveSession.update({
@@ -420,6 +460,8 @@ export class LiveSessionService {
   async adminClipUpdate(id: string, dto: any) {
     const old = await this.prisma.liveClip.findUnique({ where: { id } });
     if (!old) throw new NotFoundException('歌切不存在');
+    if (dto?.artist !== undefined)
+      dto.artist = await this.normalizeArtistField(dto.artist);
 
     const updated = await this.prisma.$transaction(async (tx) => {
       const clip = await tx.liveClip.update({ where: { id }, data: dto });
