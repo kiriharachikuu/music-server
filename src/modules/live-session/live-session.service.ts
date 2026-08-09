@@ -316,13 +316,31 @@ export class LiveSessionService {
       include: {
         clip: {
           include: {
-            session: { select: { id: true, title: true, cover: true } },
+            session: { select: { id: true, title: true, liveTime: true, cover: true } },
           },
         },
       },
       orderBy: { createdAt: 'desc' },
     });
-    return favorites.map((f) => f.clip);
+    return favorites.map((f) => {
+      const clip = f.clip;
+      return {
+        id: clip.id,
+        title: clip.title,
+        artist: clip.artist,
+        // 歌切封面回退：clip.coverUrl → session.cover
+        cover: clip.coverUrl ?? clip.session?.cover ?? null,
+        coverUrl: clip.coverUrl,
+        url: clip.fileUrl,
+        duration: clip.duration,
+        trackType: 'live_clip' as const,
+        sessionId: clip.sessionId,
+        sessionName: clip.session?.title ?? '',
+        sessionCover: clip.session?.cover ?? null,
+        liveTime: clip.session?.liveTime?.toISOString() ?? '',
+        trackIndex: clip.trackIndex,
+      };
+    });
   }
 
   // ============ Admin ============
@@ -451,14 +469,20 @@ export class LiveSessionService {
         where: finalWhere,
         orderBy: [{ sessionId: 'asc' }, { trackIndex: 'asc' }],
         include: {
-          session: { select: { id: true, title: true, liveTime: true } },
+          session: { select: { id: true, title: true, liveTime: true, cover: true } },
         },
         skip,
         take,
       }),
       this.prisma.liveClip.count({ where: finalWhere }),
     ]);
-    return buildPaginatedResult(list, total, page, limit);
+    // 后台列表项添加 cover 字段，便于管理端展示
+    const items = list.map((clip) => ({
+      ...clip,
+      cover: clip.coverUrl ?? clip.session?.cover ?? null,
+      sessionCover: clip.session?.cover ?? null,
+    }));
+    return buildPaginatedResult(items, total, page, limit);
   }
 
   /** Admin：获取歌切详情 */
@@ -466,11 +490,15 @@ export class LiveSessionService {
     const clip = await this.prisma.liveClip.findUnique({
       where: { id },
       include: {
-        session: { select: { id: true, title: true, liveTime: true } },
+        session: { select: { id: true, title: true, liveTime: true, cover: true } },
       },
     });
     if (!clip) throw new NotFoundException('歌切不存在');
-    return clip;
+    return {
+      ...clip,
+      cover: clip.coverUrl ?? clip.session?.cover ?? null,
+      sessionCover: clip.session?.cover ?? null,
+    };
   }
 
   /** Admin：新增歌切 + 同步更新场次 songCount */

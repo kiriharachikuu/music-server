@@ -82,6 +82,7 @@ export class AdminService {
           title: true,
           artist: true,
           coverUrl: true,
+          session: { select: { id: true, title: true, cover: true } },
           _count: { select: { favorites: true } },
         },
       }),
