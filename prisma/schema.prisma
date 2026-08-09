@@ -375,6 +375,22 @@ model AppVersion {
   @@index([versionCode])
 }
 
+// 平台 Web 端更新日志
+// 与 AppVersion（Android 客户端版本）独立，由后台平台更新日志页统一维护
+model PlatformChangelog {
+  id          String   @id @default(cuid())
+  version     String // 版本号（展示用，如 "1.4.3"）
+  versionCode Int      @unique // 递增版本码（排序用）
+  releaseDate DateTime @default(now())
+  title       String? // 副标题
+  content     String? // 更新内容，JSON 字符串数组
+  status      String   @default("published") // draft / published
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([versionCode])
+}
+
 // 歌手表
 model Artist {
   id                  String    @id @default(cuid())

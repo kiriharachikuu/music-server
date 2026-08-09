@@ -26,6 +26,7 @@ import { UploadModule } from './modules/upload/upload.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { StatsModule } from './modules/stats/stats.module';
 import { AppVersionModule } from './modules/app-version/app-version.module';
+import { PlatformChangelogModule } from './modules/platform-changelog/platform-changelog.module';
 import { ArtistModule } from './modules/artist/artist.module';
 import { OperationLogModule } from './modules/operation-log/operation-log.module';
 import { LiveSessionModule } from './modules/live-session/live-session.module';
@@ -54,6 +55,7 @@ import { LiveSessionModule } from './modules/live-session/live-session.module';
     AdminModule,
     StatsModule,
     AppVersionModule,
+    PlatformChangelogModule,
     ArtistModule,
     OperationLogModule,
     LiveSessionModule,
