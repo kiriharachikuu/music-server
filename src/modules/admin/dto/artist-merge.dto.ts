@@ -1,6 +1,6 @@
 import {
   IsArray,
-  IsBoolean,
+  IsIn,
   IsOptional,
   IsString,
   ArrayNotEmpty,
@@ -22,6 +22,26 @@ export class MergeArtistDto {
   @ArrayNotEmpty()
   @IsString({ each: true })
   aliases: string[];
+
+  /** 空壳歌手行处理：hide=隐藏(可恢复，默认) | delete=彻底删除干净空壳 */
+  @IsOptional()
+  @IsIn(['hide', 'delete'])
+  deleteMode?: 'hide' | 'delete';
+}
+
+/** 空壳自动清理 执行入参 */
+export class AutoCleanDto {
+  @IsOptional()
+  @IsIn(['hide', 'delete'])
+  mode?: 'hide' | 'delete';
+}
+
+/** 批量撤销入参 */
+export class RevertManyDto {
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsString({ each: true })
+  ids: string[];
 }
 
 /** 手动新增别名 */

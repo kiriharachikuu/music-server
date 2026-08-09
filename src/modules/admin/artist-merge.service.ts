@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   ARTIST_JOIN,
@@ -376,8 +377,13 @@ export class ArtistMergeService {
   // 执行合并（事务 + 快照，可撤销）
   // ========================================================================
 
-  async merge(dto: MergeArtistDto, operator?: { id?: string; username?: string }) {
+  async merge(
+    dto: MergeArtistDto,
+    operator?: { id?: string; username?: string },
+    opts?: { deleteMode?: 'hide' | 'delete'; batchId?: string; kind?: string },
+  ) {
     const plan = await this.computePlan(dto);
+    const deleteMode = opts?.deleteMode ?? 'hide';
 
     return this.prisma.$transaction(async (tx) => {
       // 1) 确保规范 Artist 行存在（供别名表引用 + 让合并后的歌手成为正式实体）
@@ -510,12 +516,43 @@ export class ArtistMergeService {
         await tx.song.update({ where: { id: songId }, data: { artist: next } });
       }
 
-      // 5) 软删别名歌手行
-      if (plan.aliasArtistIds.length) {
-        await tx.artist.updateMany({
-          where: { id: { in: plan.aliasArtistIds } },
+      // 5) 处理别名歌手行：hide=软删（可恢复）；delete=硬删"干净空壳"（无歌曲/专辑/别名指向）
+      const softDeletedArtistIds: string[] = [];
+      const hardDeletedArtists: {
+        id: string;
+        name: string;
+        avatar: string | null;
+        bio: string | null;
+        representativeWorks: string | null;
+      }[] = [];
+      for (const aid of plan.aliasArtistIds) {
+        if (deleteMode === 'delete') {
+          const [sa, aa, al] = await Promise.all([
+            tx.songArtist.count({ where: { artistId: aid } }),
+            tx.albumArtist.count({ where: { artistId: aid } }),
+            tx.artistAlias.count({ where: { artistId: aid } }),
+          ]);
+          // 只有"干净空壳"才硬删；否则退回软删，保证安全
+          if (sa === 0 && aa === 0 && al === 0) {
+            const row = await tx.artist.findUnique({ where: { id: aid } });
+            if (row) {
+              hardDeletedArtists.push({
+                id: row.id,
+                name: row.name,
+                avatar: row.avatar,
+                bio: row.bio,
+                representativeWorks: row.representativeWorks,
+              });
+              await tx.artist.delete({ where: { id: aid } });
+            }
+            continue;
+          }
+        }
+        await tx.artist.update({
+          where: { id: aid },
           data: { deletedAt: new Date() },
         });
+        softDeletedArtistIds.push(aid);
       }
 
       // 6) 登记别名（新建的记录 id 用于 revert 删除）
@@ -556,7 +593,8 @@ export class ArtistMergeService {
         albums: plan.albums.map((c) => ({ id: c.id, old: c.old })),
         songs: songSnapshots,
         songArtistMoves,
-        softDeletedArtistIds: plan.aliasArtistIds,
+        softDeletedArtistIds,
+        hardDeletedArtists,
         createdArtistId,
         createdAliasIds,
         canonicalId,
@@ -567,6 +605,8 @@ export class ArtistMergeService {
           canonicalArtistId: canonicalId,
           aliases: JSON.stringify(plan.aliasNames),
           changes: JSON.stringify(changes),
+          kind: opts?.kind ?? 'manual',
+          batchId: opts?.batchId,
           operatorId: operator?.id,
           operatorName: operator?.username,
           clipCount: plan.clips.length,
@@ -585,9 +625,118 @@ export class ArtistMergeService {
           songs: songSnapshots.length,
           aliasesRegistered: plan.aliasNames.length,
           artistRowsMerged: plan.aliasArtistIds.length,
+          hardDeleted: hardDeletedArtists.length,
+          hidden: softDeletedArtistIds.length,
         },
       };
     });
+  }
+
+  // ========================================================================
+  // 空壳歌手自动清理（有歌优先）
+  // ========================================================================
+
+  /**
+   * 扫描并分类：
+   * - auto：一组里恰好一个成员"有歌/内容"，其余都是空壳 → 可自动把空壳并入有歌的那个
+   * - manual：一组里 ≥2 个成员有内容（可能是不同的人）→ 留人工确认
+   * 只读，不写库。
+   */
+  async autoCleanPreview() {
+    const { clusters } = await this.scan();
+    const auto: {
+      canonicalName: string;
+      canonicalArtistId?: string;
+      aliases: string[];
+      targetSongs: number;
+      targetClips: number;
+      shellCount: number;
+    }[] = [];
+    const manual: typeof clusters = [];
+
+    const hasContent = (m: {
+      clips: number;
+      songs: number;
+      sessions: number;
+      albums: number;
+    }) => m.clips + m.songs + m.sessions + m.albums > 0;
+
+    for (const c of clusters) {
+      const content = c.members.filter(hasContent);
+      if (content.length === 1 && c.members.length >= 2) {
+        const canon = content[0];
+        const aliases = c.members
+          .filter((m) => normalizeArtistName(m.name) !== normalizeArtistName(canon.name))
+          .map((m) => m.name);
+        if (aliases.length) {
+          auto.push({
+            canonicalName: canon.name,
+            canonicalArtistId: canon.artistId,
+            aliases,
+            targetSongs: canon.songs,
+            targetClips: canon.clips,
+            shellCount: aliases.length,
+          });
+          continue;
+        }
+      }
+      // ≥2 个有内容，或全空壳 → 留给人工
+      manual.push(c);
+    }
+
+    return {
+      autoCount: auto.length,
+      manualCount: manual.length,
+      auto,
+      manual,
+    };
+  }
+
+  /**
+   * 执行空壳自动清理：对每个 auto 组按"有歌优先"合并，
+   * 同一次运行共享 batchId，便于整批回退。mode 决定空壳是隐藏还是彻底删除。
+   */
+  async autoCleanApply(
+    mode: 'hide' | 'delete',
+    operator?: { id?: string; username?: string },
+  ) {
+    const { auto } = await this.autoCleanPreview();
+    const batchId = randomUUID();
+    const results: { canonicalName: string; shellCount: number; logId: string }[] = [];
+    for (const plan of auto) {
+      const r = await this.merge(
+        {
+          canonicalName: plan.canonicalName,
+          canonicalArtistId: plan.canonicalArtistId,
+          aliases: plan.aliases,
+        },
+        operator,
+        { deleteMode: mode, batchId, kind: 'auto' },
+      );
+      results.push({
+        canonicalName: plan.canonicalName,
+        shellCount: plan.aliases.length,
+        logId: r.id,
+      });
+    }
+    return { batchId, mergedCount: results.length, mode, results };
+  }
+
+  /** 彻底删除一个"干净空壳"歌手（无歌曲/专辑关联）。有内容则拒绝，提示先合并。 */
+  async deleteArtistHard(id: string) {
+    const artist = await this.prisma.artist.findUnique({ where: { id } });
+    if (!artist) throw new NotFoundException('歌手不存在');
+    const [sa, aa] = await Promise.all([
+      this.prisma.songArtist.count({ where: { artistId: id } }),
+      this.prisma.albumArtist.count({ where: { artistId: id } }),
+    ]);
+    if (sa > 0 || aa > 0)
+      throw new BadRequestException(
+        '该歌手下有歌曲/专辑关联，不能直接彻底删除；请先用"合并"把内容归到正确歌手',
+      );
+    // ArtistAlias 对 Artist 是级联删除，指向它的别名会一并清除
+    await this.prisma.artist.delete({ where: { id } });
+    return { deleted: true };
   }
 
   // ========================================================================
@@ -613,6 +762,8 @@ export class ArtistMergeService {
         id: l.id,
         canonicalName: l.canonicalName,
         aliases: safeParse<string[]>(l.aliases, []),
+        kind: l.kind,
+        batchId: l.batchId,
         clipCount: l.clipCount,
         songCount: l.songCount,
         operatorName: l.operatorName,
@@ -621,6 +772,35 @@ export class ArtistMergeService {
         revertedAt: l.revertedAt,
       })),
     };
+  }
+
+  /** 批量撤销：按给定 id 列表逐条回滚（默认按传入顺序，前端可传倒序更安全） */
+  async revertMany(ids: string[]) {
+    const results: { id: string; ok: boolean; message?: string }[] = [];
+    for (const id of ids) {
+      try {
+        await this.revert(id);
+        results.push({ id, ok: true });
+      } catch (e) {
+        results.push({
+          id,
+          ok: false,
+          message: e instanceof Error ? e.message : '撤销失败',
+        });
+      }
+    }
+    return { total: ids.length, reverted: results.filter((r) => r.ok).length, results };
+  }
+
+  /** 整批撤销：撤销某次「空壳自动清理」批次的全部合并（按创建时间倒序回滚） */
+  async revertBatch(batchId: string) {
+    const logs = await this.prisma.artistMergeLog.findMany({
+      where: { batchId, revertedAt: null },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    });
+    if (!logs.length) throw new NotFoundException('该批次没有可撤销的记录');
+    return this.revertMany(logs.map((l) => l.id));
   }
 
   /** 撤销一次合并：按快照回滚 */
@@ -680,12 +860,27 @@ export class ArtistMergeService {
         }
       }
 
-      // 恢复软删的别名歌手行
+      // 恢复软删（隐藏）的别名歌手行
       if ((c.softDeletedArtistIds ?? []).length)
         await tx.artist.updateMany({
           where: { id: { in: c.softDeletedArtistIds } },
           data: { deletedAt: null },
         });
+
+      // 重建被彻底删除的空壳歌手行（用原 id 与原字段还原）
+      for (const a of c.hardDeletedArtists ?? []) {
+        const exists = await tx.artist.findUnique({ where: { id: a.id } });
+        if (!exists)
+          await tx.artist.create({
+            data: {
+              id: a.id,
+              name: a.name,
+              avatar: a.avatar ?? undefined,
+              bio: a.bio ?? undefined,
+              representativeWorks: a.representativeWorks ?? undefined,
+            },
+          });
+      }
 
       // 删除本次登记的别名
       if ((c.createdAliasIds ?? []).length)

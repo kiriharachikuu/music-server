@@ -625,8 +625,12 @@ model ArtistMergeLog {
   canonicalArtistId String?
   // 被并入的变体名列表（JSON string[]）
   aliases           String
-  // 回滚快照（JSON）：{ clips:[{id,old}], sessions:[...], albums:[...], songs:[...], softDeletedArtistIds:[...], aliasIds:[...] }
+  // 回滚快照（JSON）：{ clips, sessions, albums, songs, songArtistMoves, softDeletedArtistIds, hardDeletedArtists, createdArtistId, createdAliasIds, canonicalId }
   changes           String
+  // 来源：manual(人工合并) | auto(空壳自动清理)
+  kind              String    @default("manual")
+  // 批次 id：一次「空壳自动清理」产生的多条日志共享，用于整批回退
+  batchId           String?
   operatorId        String?
   operatorName      String?
   clipCount         Int       @default(0)
@@ -636,4 +640,5 @@ model ArtistMergeLog {
 
   @@index([canonicalArtistId])
   @@index([createdAt])
+  @@index([batchId])
 }

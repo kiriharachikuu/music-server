@@ -7,6 +7,7 @@ import {
 import { buildKeywordWhere } from '../admin/admin-resource.helpers';
 import {
   ARTIST_JOIN,
+  isLikelySameArtist,
   normalizeArtistName,
   splitArtists,
 } from '../../common/utils/artist-normalize.util';
@@ -17,8 +18,10 @@ export class LiveSessionService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * 按别名表把 artist 字符串归一到规范名（防止同一歌手被文件名不同写法再次拆分）。
-   * 逐段查 ArtistAlias.normalized，命中则替换为规范名；无命中原样返回。
+   * 上传归一：把 artist 字符串收敛到规范歌手，防止同一人被不同写法再次拆分。两级：
+   * 1) 别名表精确命中（normalized 相等）→ 换成规范名（最可靠，优先）；
+   * 2) 别名未命中时，若该段与"唯一一个有歌的歌手"高相似（子串/相似度）→ 归到它；
+   *    候选为 0 或 ≥2 个则不动（保守，避免归错人）。
    */
   private async normalizeArtistField(
     raw?: string | null,
@@ -26,21 +29,50 @@ export class LiveSessionService {
     if (raw == null) return undefined;
     const tokens = splitArtists(raw);
     if (!tokens.length) return raw;
+
     const norms = [...new Set(tokens.map(normalizeArtistName))];
     const hits = await this.prisma.artistAlias.findMany({
       where: { normalized: { in: norms } },
       select: { normalized: true, canonical: true },
     });
-    if (!hits.length) return raw;
-    const map = new Map(hits.map((h) => [h.normalized, h.canonical]));
+    const aliasMap = new Map(hits.map((h) => [h.normalized, h.canonical]));
+
+    // 仅当存在别名未命中的 token 时，才加载"有歌歌手"做相似匹配（省一次查询）
+    let contentArtists: { name: string }[] | null = null;
+    const loadContentArtists = async () => {
+      if (contentArtists) return contentArtists;
+      const artists = await this.prisma.artist.findMany({
+        where: { deletedAt: null },
+        select: {
+          name: true,
+          _count: { select: { songArtists: true, albumArtists: true } },
+        },
+      });
+      contentArtists = artists
+        .filter((a) => a._count.songArtists + a._count.albumArtists > 0)
+        .map((a) => ({ name: a.name }));
+      return contentArtists;
+    };
+
     const seen = new Set<string>();
     const out: string[] = [];
     for (const t of tokens) {
-      const canon = map.get(normalizeArtistName(t)) ?? t;
-      const k = normalizeArtistName(canon);
-      if (seen.has(k)) continue;
-      seen.add(k);
-      out.push(canon);
+      const nk = normalizeArtistName(t);
+      let canon = aliasMap.get(nk);
+      if (!canon) {
+        // 别名未命中 → 尝试"唯一有歌歌手"相似归位
+        const pool = await loadContentArtists();
+        const cands = pool.filter(
+          (a) =>
+            normalizeArtistName(a.name) !== nk && isLikelySameArtist(t, a.name),
+        );
+        if (cands.length === 1) canon = cands[0].name;
+      }
+      const finalName = canon ?? t;
+      const fk = normalizeArtistName(finalName);
+      if (seen.has(fk)) continue;
+      seen.add(fk);
+      out.push(finalName);
     }
     return out.join(ARTIST_JOIN);
   }
