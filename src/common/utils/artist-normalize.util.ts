@@ -21,7 +21,7 @@ export function normalizeArtistName(raw: string): string {
   if (!raw) return '';
   return raw
     .normalize('NFKC')
-    .replace(/[　\s]+/g, ' ')
+    .replace(/\s+/g, ' ') // JS 的 \s 已含全角/表意空格 U+3000
     .trim()
     .toLowerCase();
 }
@@ -81,7 +81,7 @@ function levenshtein(a: string, b: string): number {
   if (a === b) return 0;
   if (!a.length) return b.length;
   if (!b.length) return a.length;
-  const prev = new Array(b.length + 1);
+  const prev: number[] = new Array<number>(b.length + 1);
   for (let j = 0; j <= b.length; j++) prev[j] = j;
   for (let i = 1; i <= a.length; i++) {
     let diag = prev[0];
@@ -119,6 +119,10 @@ export function artistSimilarity(a: string, b: string): number {
 }
 
 /** 判定两名字是否「疑似同一歌手」（默认阈值 0.72，可调） */
-export function isLikelySameArtist(a: string, b: string, threshold = 0.72): boolean {
+export function isLikelySameArtist(
+  a: string,
+  b: string,
+  threshold = 0.72,
+): boolean {
   return artistSimilarity(a, b) >= threshold;
 }

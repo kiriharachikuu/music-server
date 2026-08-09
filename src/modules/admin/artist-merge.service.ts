@@ -35,6 +35,31 @@ export interface Cluster {
   why: string;
 }
 
+/** 合并回滚快照（写入 ArtistMergeLog.changes，revert 时按此还原） */
+interface MergeChanges {
+  clips: { id: string; old: string }[];
+  sessions: { id: string; old: string }[];
+  albums: { id: string; old: string }[];
+  songs: { id: string; old: string }[];
+  songArtistMoves: {
+    songId: string;
+    fromArtistId: string;
+    action: 'moved' | 'removed';
+    sort: number;
+  }[];
+  softDeletedArtistIds: string[];
+  hardDeletedArtists: {
+    id: string;
+    name: string;
+    avatar: string | null;
+    bio: string | null;
+    representativeWorks: string | null;
+  }[];
+  createdArtistId: string | null;
+  createdAliasIds: string[];
+  canonicalId: string;
+}
+
 /** preview / merge 内部计算出的改动计划 */
 interface MergePlan {
   canonicalName: string;
@@ -80,7 +105,9 @@ export class ArtistMergeService {
     }));
     scored.sort((x, y) =>
       query
-        ? y.score - x.score || y.songCount - x.songCount || x.name.localeCompare(y.name)
+        ? y.score - x.score ||
+          y.songCount - x.songCount ||
+          x.name.localeCompare(y.name)
         : y.songCount - x.songCount || x.name.localeCompare(y.name),
     );
     return { list: scored.slice(0, Math.min(50, Math.max(1, limit))) };
@@ -288,7 +315,11 @@ export class ArtistMergeService {
     const pick = (rows: { id: string; artist: string }[]) =>
       rows
         .map((r) => {
-          const next = rewriteArtistToken(r.artist, aliasNormSet, canonicalName);
+          const next = rewriteArtistToken(
+            r.artist,
+            aliasNormSet,
+            canonicalName,
+          );
           return next && next !== r.artist
             ? { id: r.id, old: r.artist, next }
             : null;
@@ -343,7 +374,11 @@ export class ArtistMergeService {
           old: c.old,
           next: c.next,
         })),
-        ...plan.albums.map((c) => ({ type: 'album', old: c.old, next: c.next })),
+        ...plan.albums.map((c) => ({
+          type: 'album',
+          old: c.old,
+          next: c.next,
+        })),
       ].slice(0, 50),
     };
   }
@@ -385,251 +420,257 @@ export class ArtistMergeService {
     const plan = await this.computePlan(dto);
     const deleteMode = opts?.deleteMode ?? 'hide';
 
-    return this.prisma.$transaction(async (tx) => {
-      // 1) 确保规范 Artist 行存在（供别名表引用 + 让合并后的歌手成为正式实体）
-      let canonicalArtist = dto.canonicalArtistId
-        ? await tx.artist.findUnique({ where: { id: dto.canonicalArtistId } })
-        : await tx.artist.findUnique({ where: { name: plan.canonicalName } });
-      let createdArtistId: string | null = null;
-      if (!canonicalArtist) {
-        canonicalArtist = await tx.artist.create({
-          data: { name: plan.canonicalName },
-        });
-        createdArtistId = canonicalArtist.id;
-      } else if (canonicalArtist.deletedAt) {
-        await tx.artist.update({
-          where: { id: canonicalArtist.id },
-          data: { deletedAt: null },
-        });
-      }
-      const canonicalId = canonicalArtist.id;
-
-      // 2) 改写字符串：clips / sessions / albums
-      for (const c of plan.clips)
-        await tx.liveClip.update({
-          where: { id: c.id },
-          data: { artist: c.next },
-        });
-      for (const s of plan.sessions)
-        await tx.liveSession.update({
-          where: { id: s.id },
-          data: { artist: s.next },
-        });
-      for (const a of plan.albums)
-        await tx.album.update({
-          where: { id: a.id },
-          data: { artist: a.next },
-        });
-
-      // 3) 歌曲：重指 SongArtist 关联（别名歌手行 → 规范行），并记录快照
-      const songArtistMoves: {
-        songId: string;
-        fromArtistId: string;
-        action: 'moved' | 'removed';
-        sort: number;
-      }[] = [];
-      const affectedSongIds = new Set<string>();
-      if (plan.aliasArtistIds.length) {
-        const rels = await tx.songArtist.findMany({
-          where: { artistId: { in: plan.aliasArtistIds } },
-        });
-        for (const rel of rels) {
-          affectedSongIds.add(rel.songId);
-          const existCanon = await tx.songArtist.findUnique({
-            where: {
-              songId_artistId: { songId: rel.songId, artistId: canonicalId },
-            },
+    return this.prisma.$transaction(
+      async (tx) => {
+        // 1) 确保规范 Artist 行存在（供别名表引用 + 让合并后的歌手成为正式实体）
+        let canonicalArtist = dto.canonicalArtistId
+          ? await tx.artist.findUnique({ where: { id: dto.canonicalArtistId } })
+          : await tx.artist.findUnique({ where: { name: plan.canonicalName } });
+        let createdArtistId: string | null = null;
+        if (!canonicalArtist) {
+          canonicalArtist = await tx.artist.create({
+            data: { name: plan.canonicalName },
           });
-          if (existCanon) {
-            // 规范关联已存在 → 删除别名关联
-            await tx.songArtist.delete({ where: { id: rel.id } });
-            songArtistMoves.push({
-              songId: rel.songId,
-              fromArtistId: rel.artistId,
-              action: 'removed',
-              sort: rel.sort,
+          createdArtistId = canonicalArtist.id;
+        } else if (canonicalArtist.deletedAt) {
+          await tx.artist.update({
+            where: { id: canonicalArtist.id },
+            data: { deletedAt: null },
+          });
+        }
+        const canonicalId = canonicalArtist.id;
+
+        // 2) 改写字符串：clips / sessions / albums
+        for (const c of plan.clips)
+          await tx.liveClip.update({
+            where: { id: c.id },
+            data: { artist: c.next },
+          });
+        for (const s of plan.sessions)
+          await tx.liveSession.update({
+            where: { id: s.id },
+            data: { artist: s.next },
+          });
+        for (const a of plan.albums)
+          await tx.album.update({
+            where: { id: a.id },
+            data: { artist: a.next },
+          });
+
+        // 3) 歌曲：重指 SongArtist 关联（别名歌手行 → 规范行），并记录快照
+        const songArtistMoves: {
+          songId: string;
+          fromArtistId: string;
+          action: 'moved' | 'removed';
+          sort: number;
+        }[] = [];
+        const affectedSongIds = new Set<string>();
+        if (plan.aliasArtistIds.length) {
+          const rels = await tx.songArtist.findMany({
+            where: { artistId: { in: plan.aliasArtistIds } },
+          });
+          for (const rel of rels) {
+            affectedSongIds.add(rel.songId);
+            const existCanon = await tx.songArtist.findUnique({
+              where: {
+                songId_artistId: { songId: rel.songId, artistId: canonicalId },
+              },
             });
-          } else {
-            await tx.songArtist.update({
-              where: { id: rel.id },
-              data: { artistId: canonicalId },
-            });
-            songArtistMoves.push({
-              songId: rel.songId,
-              fromArtistId: rel.artistId,
-              action: 'moved',
-              sort: rel.sort,
-            });
+            if (existCanon) {
+              // 规范关联已存在 → 删除别名关联
+              await tx.songArtist.delete({ where: { id: rel.id } });
+              songArtistMoves.push({
+                songId: rel.songId,
+                fromArtistId: rel.artistId,
+                action: 'removed',
+                sort: rel.sort,
+              });
+            } else {
+              await tx.songArtist.update({
+                where: { id: rel.id },
+                data: { artistId: canonicalId },
+              });
+              songArtistMoves.push({
+                songId: rel.songId,
+                fromArtistId: rel.artistId,
+                action: 'moved',
+                sort: rel.sort,
+              });
+            }
           }
         }
-      }
-      // 字符串命中但无关联的歌曲
-      const strSongs = await tx.song.findMany({
-        where: { deletedAt: null },
-        select: { id: true, artist: true },
-      });
-      const songStringHits = strSongs.filter((s) => {
-        const next = rewriteArtistToken(
-          s.artist,
-          plan.aliasNormSet,
-          plan.canonicalName,
-        );
-        return next && next !== s.artist;
-      });
-      songStringHits.forEach((s) => affectedSongIds.add(s.id));
-
-      // 4) 快照旧的 Song.artist 字符串（用于 revert），再刷新新值
-      const songSnapshots: { id: string; old: string }[] = [];
-      for (const songId of affectedSongIds) {
-        const song = await tx.song.findUnique({
-          where: { id: songId },
-          select: { artist: true },
+        // 字符串命中但无关联的歌曲
+        const strSongs = await tx.song.findMany({
+          where: { deletedAt: null },
+          select: { id: true, artist: true },
         });
-        if (!song) continue;
-        songSnapshots.push({ id: songId, old: song.artist });
-        // 新值：有关联的按关联派生，无关联的按字符串改写
-        const rels = await tx.songArtist.findMany({
-          where: { songId },
-          include: { artist: { select: { name: true } } },
-          orderBy: { sort: 'asc' },
+        const songStringHits = strSongs.filter((s) => {
+          const next = rewriteArtistToken(
+            s.artist,
+            plan.aliasNormSet,
+            plan.canonicalName,
+          );
+          return next && next !== s.artist;
         });
-        let next: string;
-        if (rels.length) {
-          const seen = new Set<string>();
-          const names = rels
-            .map((r) => r.artist.name)
-            .filter((n) => {
-              const k = normalizeArtistName(n);
-              if (seen.has(k)) return false;
-              seen.add(k);
-              return true;
-            });
-          next = names.join(ARTIST_JOIN);
-        } else {
-          next =
-            rewriteArtistToken(
-              song.artist,
-              plan.aliasNormSet,
-              plan.canonicalName,
-            ) ?? song.artist;
-        }
-        await tx.song.update({ where: { id: songId }, data: { artist: next } });
-      }
+        songStringHits.forEach((s) => affectedSongIds.add(s.id));
 
-      // 5) 处理别名歌手行：hide=软删（可恢复）；delete=硬删"干净空壳"（无歌曲/专辑/别名指向）
-      const softDeletedArtistIds: string[] = [];
-      const hardDeletedArtists: {
-        id: string;
-        name: string;
-        avatar: string | null;
-        bio: string | null;
-        representativeWorks: string | null;
-      }[] = [];
-      for (const aid of plan.aliasArtistIds) {
-        if (deleteMode === 'delete') {
-          const [sa, aa, al] = await Promise.all([
-            tx.songArtist.count({ where: { artistId: aid } }),
-            tx.albumArtist.count({ where: { artistId: aid } }),
-            tx.artistAlias.count({ where: { artistId: aid } }),
-          ]);
-          // 只有"干净空壳"才硬删；否则退回软删，保证安全
-          if (sa === 0 && aa === 0 && al === 0) {
-            const row = await tx.artist.findUnique({ where: { id: aid } });
-            if (row) {
-              hardDeletedArtists.push({
-                id: row.id,
-                name: row.name,
-                avatar: row.avatar,
-                bio: row.bio,
-                representativeWorks: row.representativeWorks,
+        // 4) 快照旧的 Song.artist 字符串（用于 revert），再刷新新值
+        const songSnapshots: { id: string; old: string }[] = [];
+        for (const songId of affectedSongIds) {
+          const song = await tx.song.findUnique({
+            where: { id: songId },
+            select: { artist: true },
+          });
+          if (!song) continue;
+          songSnapshots.push({ id: songId, old: song.artist });
+          // 新值：有关联的按关联派生，无关联的按字符串改写
+          const rels = await tx.songArtist.findMany({
+            where: { songId },
+            include: { artist: { select: { name: true } } },
+            orderBy: { sort: 'asc' },
+          });
+          let next: string;
+          if (rels.length) {
+            const seen = new Set<string>();
+            const names = rels
+              .map((r) => r.artist.name)
+              .filter((n) => {
+                const k = normalizeArtistName(n);
+                if (seen.has(k)) return false;
+                seen.add(k);
+                return true;
               });
-              await tx.artist.delete({ where: { id: aid } });
+            next = names.join(ARTIST_JOIN);
+          } else {
+            next =
+              rewriteArtistToken(
+                song.artist,
+                plan.aliasNormSet,
+                plan.canonicalName,
+              ) ?? song.artist;
+          }
+          await tx.song.update({
+            where: { id: songId },
+            data: { artist: next },
+          });
+        }
+
+        // 5) 处理别名歌手行：hide=软删（可恢复）；delete=硬删"干净空壳"（无歌曲/专辑/别名指向）
+        const softDeletedArtistIds: string[] = [];
+        const hardDeletedArtists: {
+          id: string;
+          name: string;
+          avatar: string | null;
+          bio: string | null;
+          representativeWorks: string | null;
+        }[] = [];
+        for (const aid of plan.aliasArtistIds) {
+          if (deleteMode === 'delete') {
+            const [sa, aa, al] = await Promise.all([
+              tx.songArtist.count({ where: { artistId: aid } }),
+              tx.albumArtist.count({ where: { artistId: aid } }),
+              tx.artistAlias.count({ where: { artistId: aid } }),
+            ]);
+            // 只有"干净空壳"才硬删；否则退回软删，保证安全
+            if (sa === 0 && aa === 0 && al === 0) {
+              const row = await tx.artist.findUnique({ where: { id: aid } });
+              if (row) {
+                hardDeletedArtists.push({
+                  id: row.id,
+                  name: row.name,
+                  avatar: row.avatar,
+                  bio: row.bio,
+                  representativeWorks: row.representativeWorks,
+                });
+                await tx.artist.delete({ where: { id: aid } });
+              }
+              continue;
+            }
+          }
+          await tx.artist.update({
+            where: { id: aid },
+            data: { deletedAt: new Date() },
+          });
+          softDeletedArtistIds.push(aid);
+        }
+
+        // 6) 登记别名（新建的记录 id 用于 revert 删除）
+        const createdAliasIds: string[] = [];
+        for (const name of plan.aliasNames) {
+          const exist = await tx.artistAlias.findUnique({
+            where: { alias: name },
+          });
+          if (exist) {
+            if (exist.artistId !== canonicalId) {
+              await tx.artistAlias.update({
+                where: { id: exist.id },
+                data: {
+                  artistId: canonicalId,
+                  canonical: plan.canonicalName,
+                  source: 'merge',
+                },
+              });
             }
             continue;
           }
+          const created = await tx.artistAlias.create({
+            data: {
+              alias: name,
+              normalized: normalizeArtistName(name),
+              artistId: canonicalId,
+              canonical: plan.canonicalName,
+              source: 'merge',
+            },
+          });
+          createdAliasIds.push(created.id);
         }
-        await tx.artist.update({
-          where: { id: aid },
-          data: { deletedAt: new Date() },
-        });
-        softDeletedArtistIds.push(aid);
-      }
 
-      // 6) 登记别名（新建的记录 id 用于 revert 删除）
-      const createdAliasIds: string[] = [];
-      for (const name of plan.aliasNames) {
-        const exist = await tx.artistAlias.findUnique({
-          where: { alias: name },
-        });
-        if (exist) {
-          if (exist.artistId !== canonicalId) {
-            await tx.artistAlias.update({
-              where: { id: exist.id },
-              data: {
-                artistId: canonicalId,
-                canonical: plan.canonicalName,
-                source: 'merge',
-              },
-            });
-          }
-          continue;
-        }
-        const created = await tx.artistAlias.create({
+        // 7) 写合并日志（含回滚快照）
+        const changes = {
+          clips: plan.clips.map((c) => ({ id: c.id, old: c.old })),
+          sessions: plan.sessions.map((c) => ({ id: c.id, old: c.old })),
+          albums: plan.albums.map((c) => ({ id: c.id, old: c.old })),
+          songs: songSnapshots,
+          songArtistMoves,
+          softDeletedArtistIds,
+          hardDeletedArtists,
+          createdArtistId,
+          createdAliasIds,
+          canonicalId,
+        };
+        const log = await tx.artistMergeLog.create({
           data: {
-            alias: name,
-            normalized: normalizeArtistName(name),
-            artistId: canonicalId,
-            canonical: plan.canonicalName,
-            source: 'merge',
+            canonicalName: plan.canonicalName,
+            canonicalArtistId: canonicalId,
+            aliases: JSON.stringify(plan.aliasNames),
+            changes: JSON.stringify(changes),
+            kind: opts?.kind ?? 'manual',
+            batchId: opts?.batchId,
+            operatorId: operator?.id,
+            operatorName: operator?.username,
+            clipCount: plan.clips.length,
+            songCount: songSnapshots.length,
           },
         });
-        createdAliasIds.push(created.id);
-      }
 
-      // 7) 写合并日志（含回滚快照）
-      const changes = {
-        clips: plan.clips.map((c) => ({ id: c.id, old: c.old })),
-        sessions: plan.sessions.map((c) => ({ id: c.id, old: c.old })),
-        albums: plan.albums.map((c) => ({ id: c.id, old: c.old })),
-        songs: songSnapshots,
-        songArtistMoves,
-        softDeletedArtistIds,
-        hardDeletedArtists,
-        createdArtistId,
-        createdAliasIds,
-        canonicalId,
-      };
-      const log = await tx.artistMergeLog.create({
-        data: {
+        return {
+          id: log.id,
           canonicalName: plan.canonicalName,
-          canonicalArtistId: canonicalId,
-          aliases: JSON.stringify(plan.aliasNames),
-          changes: JSON.stringify(changes),
-          kind: opts?.kind ?? 'manual',
-          batchId: opts?.batchId,
-          operatorId: operator?.id,
-          operatorName: operator?.username,
-          clipCount: plan.clips.length,
-          songCount: songSnapshots.length,
-        },
-      });
-
-      return {
-        id: log.id,
-        canonicalName: plan.canonicalName,
-        merged: plan.aliasNames,
-        summary: {
-          clips: plan.clips.length,
-          sessions: plan.sessions.length,
-          albums: plan.albums.length,
-          songs: songSnapshots.length,
-          aliasesRegistered: plan.aliasNames.length,
-          artistRowsMerged: plan.aliasArtistIds.length,
-          hardDeleted: hardDeletedArtists.length,
-          hidden: softDeletedArtistIds.length,
-        },
-      };
-    });
+          merged: plan.aliasNames,
+          summary: {
+            clips: plan.clips.length,
+            sessions: plan.sessions.length,
+            albums: plan.albums.length,
+            songs: songSnapshots.length,
+            aliasesRegistered: plan.aliasNames.length,
+            artistRowsMerged: plan.aliasArtistIds.length,
+            hardDeleted: hardDeletedArtists.length,
+            hidden: softDeletedArtistIds.length,
+          },
+        };
+      },
+      { timeout: 60000 },
+    );
   }
 
   // ========================================================================
@@ -654,19 +695,47 @@ export class ArtistMergeService {
     }[] = [];
     const manual: typeof clusters = [];
 
+    // 结构化内容：Artist 行的 songArtist/albumArtist 关联数。
+    // "有歌"以字符串出现 OR 结构化关联为准，避免"关联有歌但显示串不含名字"的正主被误判成空壳。
+    const artistIds = [
+      ...new Set(
+        clusters.flatMap((c) =>
+          c.members.map((m) => m.artistId).filter((x): x is string => !!x),
+        ),
+      ),
+    ];
+    const rows = artistIds.length
+      ? await this.prisma.artist.findMany({
+          where: { id: { in: artistIds } },
+          select: {
+            id: true,
+            _count: { select: { songArtists: true, albumArtists: true } },
+          },
+        })
+      : [];
+    const structured = new Map(
+      rows.map((a) => [a.id, a._count.songArtists + a._count.albumArtists]),
+    );
+
     const hasContent = (m: {
       clips: number;
       songs: number;
       sessions: number;
       albums: number;
-    }) => m.clips + m.songs + m.sessions + m.albums > 0;
+      artistId?: string;
+    }) =>
+      m.clips + m.songs + m.sessions + m.albums > 0 ||
+      (m.artistId ? (structured.get(m.artistId) ?? 0) > 0 : false);
 
     for (const c of clusters) {
       const content = c.members.filter(hasContent);
       if (content.length === 1 && c.members.length >= 2) {
         const canon = content[0];
         const aliases = c.members
-          .filter((m) => normalizeArtistName(m.name) !== normalizeArtistName(canon.name))
+          .filter(
+            (m) =>
+              normalizeArtistName(m.name) !== normalizeArtistName(canon.name),
+          )
           .map((m) => m.name);
         if (aliases.length) {
           auto.push({
@@ -702,7 +771,11 @@ export class ArtistMergeService {
   ) {
     const { auto } = await this.autoCleanPreview();
     const batchId = randomUUID();
-    const results: { canonicalName: string; shellCount: number; logId: string }[] = [];
+    const results: {
+      canonicalName: string;
+      shellCount: number;
+      logId: string;
+    }[] = [];
     for (const plan of auto) {
       const r = await this.merge(
         {
@@ -726,15 +799,19 @@ export class ArtistMergeService {
   async deleteArtistHard(id: string) {
     const artist = await this.prisma.artist.findUnique({ where: { id } });
     if (!artist) throw new NotFoundException('歌手不存在');
-    const [sa, aa] = await Promise.all([
+    const [sa, aa, al] = await Promise.all([
       this.prisma.songArtist.count({ where: { artistId: id } }),
       this.prisma.albumArtist.count({ where: { artistId: id } }),
+      this.prisma.artistAlias.count({ where: { artistId: id } }),
     ]);
     if (sa > 0 || aa > 0)
       throw new BadRequestException(
         '该歌手下有歌曲/专辑关联，不能直接彻底删除；请先用"合并"把内容归到正确歌手',
       );
-    // ArtistAlias 对 Artist 是级联删除，指向它的别名会一并清除
+    if (al > 0)
+      throw new BadRequestException(
+        '该歌手是其它别名的规范目标（有别名指向它），不能直接删除；请先处理其别名',
+      );
     await this.prisma.artist.delete({ where: { id } });
     return { deleted: true };
   }
@@ -745,7 +822,10 @@ export class ArtistMergeService {
 
   async listLogs(query: { page?: string; limit?: string }) {
     const page = Math.max(1, parseInt(query.page ?? '1', 10) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(query.limit ?? '20', 10) || 20));
+    const limit = Math.min(
+      100,
+      Math.max(1, parseInt(query.limit ?? '20', 10) || 20),
+    );
     const [list, total] = await this.prisma.$transaction([
       this.prisma.artistMergeLog.findMany({
         orderBy: { createdAt: 'desc' },
@@ -789,7 +869,11 @@ export class ArtistMergeService {
         });
       }
     }
-    return { total: ids.length, reverted: results.filter((r) => r.ok).length, results };
+    return {
+      total: ids.length,
+      reverted: results.filter((r) => r.ok).length,
+      results,
+    };
   }
 
   /** 整批撤销：撤销某次「空壳自动清理」批次的全部合并（按创建时间倒序回滚） */
@@ -808,102 +892,111 @@ export class ArtistMergeService {
     const log = await this.prisma.artistMergeLog.findUnique({ where: { id } });
     if (!log) throw new NotFoundException('合并记录不存在');
     if (log.revertedAt) throw new BadRequestException('该合并已撤销');
-    const c = safeParse<any>(log.changes, null);
+    const c = safeParse<MergeChanges | null>(log.changes, null);
     if (!c) throw new BadRequestException('快照损坏，无法自动撤销');
 
-    await this.prisma.$transaction(async (tx) => {
-      // 还原字符串
-      for (const r of c.clips ?? [])
-        await tx.liveClip.update({
-          where: { id: r.id },
-          data: { artist: r.old },
-        });
-      for (const r of c.sessions ?? [])
-        await tx.liveSession.update({
-          where: { id: r.id },
-          data: { artist: r.old },
-        });
-      for (const r of c.albums ?? [])
-        await tx.album.update({ where: { id: r.id }, data: { artist: r.old } });
-      for (const r of c.songs ?? [])
-        await tx.song.update({ where: { id: r.id }, data: { artist: r.old } });
+    await this.prisma.$transaction(
+      async (tx) => {
+        // 还原字符串
+        for (const r of c.clips ?? [])
+          await tx.liveClip.update({
+            where: { id: r.id },
+            data: { artist: r.old },
+          });
+        for (const r of c.sessions ?? [])
+          await tx.liveSession.update({
+            where: { id: r.id },
+            data: { artist: r.old },
+          });
+        for (const r of c.albums ?? [])
+          await tx.album.update({
+            where: { id: r.id },
+            data: { artist: r.old },
+          });
+        for (const r of c.songs ?? [])
+          await tx.song.update({
+            where: { id: r.id },
+            data: { artist: r.old },
+          });
 
-      // 还原 SongArtist 关联
-      for (const m of c.songArtistMoves ?? []) {
-        if (m.action === 'moved') {
-          // 当时把 fromArtistId → canonicalId，现在改回
-          const rel = await tx.songArtist.findUnique({
-            where: {
-              songId_artistId: { songId: m.songId, artistId: c.canonicalId },
-            },
-          });
-          if (rel)
-            await tx.songArtist.update({
-              where: { id: rel.id },
-              data: { artistId: m.fromArtistId },
+        // 还原 SongArtist 关联
+        for (const m of c.songArtistMoves ?? []) {
+          if (m.action === 'moved') {
+            // 当时把 fromArtistId → canonicalId，现在改回
+            const rel = await tx.songArtist.findUnique({
+              where: {
+                songId_artistId: { songId: m.songId, artistId: c.canonicalId },
+              },
             });
-        } else if (m.action === 'removed') {
-          // 当时删除了别名关联，重建
-          const dup = await tx.songArtist.findUnique({
-            where: {
-              songId_artistId: { songId: m.songId, artistId: m.fromArtistId },
-            },
+            if (rel)
+              await tx.songArtist.update({
+                where: { id: rel.id },
+                data: { artistId: m.fromArtistId },
+              });
+          } else if (m.action === 'removed') {
+            // 当时删除了别名关联，重建
+            const dup = await tx.songArtist.findUnique({
+              where: {
+                songId_artistId: { songId: m.songId, artistId: m.fromArtistId },
+              },
+            });
+            if (!dup)
+              await tx.songArtist.create({
+                data: {
+                  songId: m.songId,
+                  artistId: m.fromArtistId,
+                  sort: m.sort ?? 0,
+                },
+              });
+          }
+        }
+
+        // 恢复软删（隐藏）的别名歌手行
+        if ((c.softDeletedArtistIds ?? []).length)
+          await tx.artist.updateMany({
+            where: { id: { in: c.softDeletedArtistIds } },
+            data: { deletedAt: null },
           });
-          if (!dup)
-            await tx.songArtist.create({
+
+        // 重建被彻底删除的空壳歌手行（用原 id 与原字段还原）
+        for (const a of c.hardDeletedArtists ?? []) {
+          const exists = await tx.artist.findUnique({ where: { id: a.id } });
+          if (!exists)
+            await tx.artist.create({
               data: {
-                songId: m.songId,
-                artistId: m.fromArtistId,
-                sort: m.sort ?? 0,
+                id: a.id,
+                name: a.name,
+                avatar: a.avatar ?? undefined,
+                bio: a.bio ?? undefined,
+                representativeWorks: a.representativeWorks ?? undefined,
               },
             });
         }
-      }
 
-      // 恢复软删（隐藏）的别名歌手行
-      if ((c.softDeletedArtistIds ?? []).length)
-        await tx.artist.updateMany({
-          where: { id: { in: c.softDeletedArtistIds } },
-          data: { deletedAt: null },
-        });
-
-      // 重建被彻底删除的空壳歌手行（用原 id 与原字段还原）
-      for (const a of c.hardDeletedArtists ?? []) {
-        const exists = await tx.artist.findUnique({ where: { id: a.id } });
-        if (!exists)
-          await tx.artist.create({
-            data: {
-              id: a.id,
-              name: a.name,
-              avatar: a.avatar ?? undefined,
-              bio: a.bio ?? undefined,
-              representativeWorks: a.representativeWorks ?? undefined,
-            },
+        // 删除本次登记的别名
+        if ((c.createdAliasIds ?? []).length)
+          await tx.artistAlias.deleteMany({
+            where: { id: { in: c.createdAliasIds } },
           });
-      }
 
-      // 删除本次登记的别名
-      if ((c.createdAliasIds ?? []).length)
-        await tx.artistAlias.deleteMany({
-          where: { id: { in: c.createdAliasIds } },
+        // 删除本次新建的规范歌手行（仅当是本次创建的）
+        if (c.createdArtistId) {
+          const stillUsed = await tx.songArtist.count({
+            where: { artistId: c.createdArtistId },
+          });
+          if (!stillUsed)
+            await tx.artist
+              .delete({ where: { id: c.createdArtistId } })
+              .catch(() => undefined);
+        }
+
+        await tx.artistMergeLog.update({
+          where: { id },
+          data: { revertedAt: new Date() },
         });
-
-      // 删除本次新建的规范歌手行（仅当是本次创建的）
-      if (c.createdArtistId) {
-        const stillUsed = await tx.songArtist.count({
-          where: { artistId: c.createdArtistId },
-        });
-        if (!stillUsed)
-          await tx.artist
-            .delete({ where: { id: c.createdArtistId } })
-            .catch(() => undefined);
-      }
-
-      await tx.artistMergeLog.update({
-        where: { id },
-        data: { revertedAt: new Date() },
-      });
-    });
+      },
+      { timeout: 60000 },
+    );
 
     return { reverted: true };
   }
