@@ -110,6 +110,36 @@ async function bootstrap() {
       preflightContinue: false,
       optionsSuccessStatus: 204,
     });
+
+    // 兜底：NestJS 的 UnauthorizedException / BadRequestException 等异常
+    // 在 BaseExceptionFilter 拦截后直接返回 JSON，**会绕过 cors 中间件**，
+    // 导致 4xx/5xx 响应没有 Access-Control-Allow-Origin 头，浏览器判定为 CORS 失败
+    // 并报 "网络请求失败"（TypeError: Failed to fetch）。
+    // 这里用 response 监听器兜底，对所有响应统一注入 CORS 头。
+    const isOriginAllowed = (origin: string | undefined): boolean => {
+      if (!origin) return false;
+      if (hasWildcard || effectiveOrigin === true) return true;
+      if (Array.isArray(effectiveOrigin)) return effectiveOrigin.includes(origin);
+      return effectiveOrigin === origin;
+    };
+    app.use((req: Request, res: Response, next: NextFunction) => {
+      const origin = req.headers.origin;
+      if (origin && isOriginAllowed(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Vary', 'Origin');
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+        res.setHeader(
+          'Access-Control-Allow-Methods',
+          'GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD',
+        );
+        res.setHeader(
+          'Access-Control-Allow-Headers',
+          'Content-Type, Authorization, X-Requested-With',
+        );
+        res.setHeader('Access-Control-Max-Age', '86400');
+      }
+      next();
+    });
   }
 
   // 全局路由前缀
