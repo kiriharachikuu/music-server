@@ -1,22 +1,22 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import type { RankingItem, RankingType } from './ranking.types';
+import type { RankingItem } from './ranking.types';
 import { RankingPlaylistService } from './ranking-playlist.service';
 
 /**
- * 新歌榜服务
+ * 综合新歌榜服务
  *
- * 三档：综合 / 单曲 / 歌切
+ * - 仅一档：综合（单曲 + 歌切混合排序）
  * - 实时查询（按 createdAt 倒序），无需定时计算
  * - 但为了与飙升/热歌统一暴露 compute 入口，结果缓存到 SystemSetting，TTL 10 分钟
- * - 同步到对应系统歌单
+ * - 同步到"综合-新歌榜"系统歌单
  */
 @Injectable()
 export class NewRankingService {
   private readonly logger = new Logger(NewRankingService.name);
   private static readonly TOP_N = 50;
   private static readonly CACHE_TTL_MS = 10 * 60 * 1000;
-  private static readonly SETTING_KEY_PREFIX = 'newRankingData';
+  private static readonly SETTING_KEY = 'newRankingData';
 
   constructor(
     private readonly prisma: PrismaService,
@@ -24,93 +24,41 @@ export class NewRankingService {
   ) {}
 
   /**
-   * 计算（或刷新）新歌榜
+   * 计算（或刷新）综合新歌榜
    * 实际是 findMany 排序 + 缓存，用于与 hot/soar 行为对齐
    */
-  async compute(type: RankingType = 'single'): Promise<RankingItem[]> {
-    this.logger.log(`刷新新歌榜（${type}）...`);
-    const items = await this.fetchItems(type);
+  async compute(): Promise<RankingItem[]> {
+    this.logger.log('刷新综合新歌榜...');
+    const items = await this.fetchItems();
     const payload = JSON.stringify({
       items,
       computedAt: new Date().toISOString(),
     });
     await this.prisma.systemSetting.upsert({
-      where: { key: this.cacheKey(type) },
+      where: { key: NewRankingService.SETTING_KEY },
       update: { value: payload },
-      create: { key: this.cacheKey(type), value: payload },
+      create: { key: NewRankingService.SETTING_KEY, value: payload },
     });
 
-    await this.rankingPlaylistService.syncTop50(type, 'new', items);
+    await this.rankingPlaylistService.syncTop50('new', items);
     return items;
   }
 
   /** 读取缓存；若过期或不存在则重新计算 */
-  async getTop(type: RankingType = 'single'): Promise<RankingItem[]> {
-    const cached = await this.readCache(type);
+  async getTop(): Promise<RankingItem[]> {
+    const cached = await this.readCache();
     if (cached) {
       const elapsed = Date.now() - new Date(cached.computedAt).getTime();
       if (elapsed < NewRankingService.CACHE_TTL_MS && cached.items.length > 0) {
         return cached.items;
       }
     }
-    this.logger.warn(`新歌榜（${type}）缓存失效，实时计算...`);
-    return this.compute(type);
+    this.logger.warn('综合新歌榜缓存失效，实时计算...');
+    return this.compute();
   }
 
   /** 实际查询并组装列表 */
-  private async fetchItems(type: RankingType): Promise<RankingItem[]> {
-    if (type === 'single') {
-      const songs = await this.prisma.song.findMany({
-        where: { deletedAt: null, status: 'PUBLISHED' },
-        orderBy: { createdAt: 'desc' },
-        take: NewRankingService.TOP_N,
-        include: {
-          album: true,
-          songArtists: {
-            take: 1,
-            orderBy: { sort: 'asc' },
-            include: { artist: { select: { id: true } } },
-          },
-        },
-      });
-      return songs.map((song, idx) => ({
-        id: song.id,
-        itemId: song.id,
-        trackType: 'song' as const,
-        title: song.title,
-        artist: song.artist,
-        cover: song.coverUrl ?? song.album?.cover ?? null,
-        duration: song.duration,
-        rank: idx + 1,
-        artistId: song.songArtists?.[0]?.artistId ?? null,
-        createdAt: song.createdAt.toISOString(),
-      }));
-    }
-    if (type === 'clip') {
-      const clips = await this.prisma.liveClip.findMany({
-        where: { status: 'PUBLISHED' },
-        orderBy: { createdAt: 'desc' },
-        take: NewRankingService.TOP_N,
-        include: {
-          session: { select: { id: true, title: true, liveTime: true, cover: true } },
-        },
-      });
-      return clips.map((clip, idx) => ({
-        id: clip.id,
-        itemId: clip.id,
-        trackType: 'clip' as const,
-        title: clip.title,
-        artist: clip.artist,
-        cover: clip.coverUrl ?? clip.session?.cover ?? null,
-        duration: clip.duration,
-        rank: idx + 1,
-        sessionId: clip.sessionId,
-        sessionName: clip.session?.title ?? '',
-        fileUrl: clip.fileUrl,
-        createdAt: clip.createdAt.toISOString(),
-      }));
-    }
-    // combined
+  private async fetchItems(): Promise<RankingItem[]> {
     const [songs, clips] = await Promise.all([
       this.prisma.song.findMany({
         where: { deletedAt: null, status: 'PUBLISHED' },
@@ -183,15 +131,12 @@ export class NewRankingService {
       .map((r, idx) => ({ ...r.build(), rank: idx + 1 }));
   }
 
-  private cacheKey(type: RankingType): string {
-    return `${NewRankingService.SETTING_KEY_PREFIX}:${type}`;
-  }
-
-  private async readCache(
-    type: RankingType,
-  ): Promise<{ items: RankingItem[]; computedAt: string } | null> {
+  private async readCache(): Promise<{
+    items: RankingItem[];
+    computedAt: string;
+  } | null> {
     const row = await this.prisma.systemSetting.findUnique({
-      where: { key: this.cacheKey(type) },
+      where: { key: NewRankingService.SETTING_KEY },
     });
     if (!row) return null;
     try {

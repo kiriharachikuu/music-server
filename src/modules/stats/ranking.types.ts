@@ -1,9 +1,10 @@
 /**
- * 排行榜相关类型定义（综合/单曲/歌切 × 飙升/热歌/新歌，共 9 档）
+ * 排行榜相关类型定义
+ *
+ * 仅保留 3 档"综合"榜单：综合-飙升榜 / 综合-热歌榜 / 综合-新歌榜
+ * - 综合：单曲（Song）+ 歌切（LiveClip）混合排序
+ * - 旧版"单曲 / 歌切"两档已移除
  */
-
-/** 排行榜主体类型 */
-export type RankingType = 'combined' | 'single' | 'clip';
 
 /** 排行榜分类 */
 export type RankingKind = 'soar' | 'hot' | 'new';
@@ -47,10 +48,8 @@ export interface RankingItem {
   [key: string]: unknown;
 }
 
-/** 排行榜响应结构（同时供前端 9 档使用） */
+/** 排行榜响应结构 */
 export interface RankingResponse {
-  /** 类型：combined / single / clip */
-  type: RankingType;
   /** 榜单：soar / hot / new */
   ranking: RankingKind;
   /** 标题（如：综合-飙升榜） */

@@ -7,7 +7,6 @@ import {
   RankingItem,
   RankingKind,
   RankingResponse,
-  RankingType,
 } from './ranking.types';
 import {
   RANKING_DESCRIPTIONS,
@@ -211,75 +210,41 @@ export class StatsService {
     }));
   }
 
-  // ============ 9 档排行榜 ============
+  // ============ 3 档综合排行榜 ============
 
   /**
-   * 旧版 API（保持向后兼容）
-   * 返回 { soar, new, hot } 三个数组的旧结构
-   */
-  async getRankings(_by: 'play' | 'favorite' = 'play') {
-    const [soar, news, hot] = await Promise.all([
-      this.getRankingsByType('single', 'soar'),
-      this.getRankingsByType('single', 'new'),
-      this.getRankingsByType('single', 'hot'),
-    ]);
-    return {
-      soar: this.stripsItemFields(soar.tracks),
-      new: this.stripsItemFields(news.tracks),
-      hot: this.stripsItemFields(hot.tracks),
-    };
-  }
-
-  /**
-   * 9 档排行榜统一入口
-   * @param type 综合(combined) / 单曲(single) / 歌切(clip)
+   * 单档综合排行榜入口
    * @param ranking 飙升(soar) / 热歌(hot) / 新歌(new)
    */
-  async getRankingsByType(
-    type: RankingType = 'combined',
+  async getRanking(
     ranking: RankingKind = 'soar',
   ): Promise<RankingResponse> {
     let items: RankingItem[] = [];
     if (ranking === 'soar') {
-      items = await this.soarRankingService.getTop(type);
+      items = await this.soarRankingService.getTop();
     } else if (ranking === 'hot') {
-      items = await this.hotRankingService.getTop(type);
+      items = await this.hotRankingService.getTop();
     } else {
-      items = await this.newRankingService.getTop(type);
+      items = await this.newRankingService.getTop();
     }
 
     // 重排 rank（防止缓存中 rank 字段缺失/重复）
     const tracks = items.map((it, idx) => ({ ...it, rank: idx + 1 }));
 
-    const playlist = await this.rankingPlaylistService.findPlaylist(type, ranking);
+    const playlist = await this.rankingPlaylistService.findPlaylist(ranking);
 
     return {
-      type,
       ranking,
-      title: RankingPlaylistService.nameOf(type, ranking),
+      title: RankingPlaylistService.nameOf(ranking),
       cover: playlist?.cover ?? tracks[0]?.cover ?? null,
       description:
-        RANKING_DESCRIPTIONS[`${type}-${ranking}`] ??
+        RANKING_DESCRIPTIONS[ranking] ??
         playlist?.description ??
         '',
       tracks,
       updatedAt: new Date().toISOString(),
       playlistId: playlist?.id ?? null,
     };
-  }
-
-  /** 旧版响应需要剥除 trackType/rank 等扩展字段，仅返回原始单曲字段 */
-  private stripsItemFields(items: RankingItem[]): any[] {
-    return items.map((it) => {
-      if (it.trackType === 'song') {
-        // 单曲：去掉 trackType/itemId/cover 多余 alias，保留 Song 原生字段
-        const { trackType, itemId, rank, cover, ...rest } = it;
-        return { ...rest, coverUrl: rest.coverUrl ?? cover };
-      }
-      // 歌切：返回 LiveClip 形状
-      const { trackType, itemId, rank, cover, ...rest } = it;
-      return { ...rest, coverUrl: rest.coverUrl ?? cover };
-    });
   }
 
   /** 站点公开设置项 */

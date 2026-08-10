@@ -1,53 +1,36 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import { StatsService } from './stats.service';
-import type { RankingKind, RankingType } from './ranking.types';
+import type { RankingKind } from './ranking.types';
 
 /**
  * 排行榜控制器
  * 路由：
- * - GET /api/rankings?type=combined|single|clip&ranking=soar|hot|new
- *   type 默认 combined；ranking 默认 soar
- *   返回单档榜单的完整结构（含 tracks/title/cover/description/updatedAt）
- * - GET /api/rankings/all?type=single
- *   返回该 type 下 soar/hot/new 三档一并（旧版兼容）
+ * - GET /api/rankings?ranking=soar|hot|new
+ *   ranking 默认 soar
+ *   返回单档综合榜单的完整结构（含 tracks/title/cover/description/updatedAt）
+ *
+ * 旧版 type 参数已废弃（保留 type 查询参数仅为向后兼容，取值被忽略）。
+ * 旧版 GET /api/rankings/all 端点已删除。
  */
 @Controller('rankings')
 export class RankingsController {
   constructor(private readonly statsService: StatsService) {}
 
   /**
-   * 9 档排行榜单档查询
-   * - type=combined 综合（含 song + clip）
-   * - type=single 仅单曲
-   * - type=clip 仅歌切
-   * - ranking=soar 飙升 / hot 热歌 / new 新歌
+   * 3 档综合榜单单档查询
+   * - ranking=soar 综合-飙升榜
+   * - ranking=hot 综合-热歌榜
+   * - ranking=new 综合-新歌榜
+   *
+   * 注：旧版 type=combined|single|clip 参数被忽略，仅保留 3 档综合榜单。
    */
   @Get()
   rankings(
-    @Query('type') type?: string,
+    @Query('type') _type?: string,
     @Query('ranking') ranking?: string,
   ) {
-    const t = this.normalizeType(type);
     const r = this.normalizeRanking(ranking);
-    return this.statsService.getRankingsByType(t, r);
-  }
-
-  /**
-   * 旧版三档合一接口：返回 { soar, new, hot }
-   * 保留路径 /rankings/all 以便旧调用方平滑迁移
-   */
-  @Get('all')
-  all(@Query('by') by?: string) {
-    return this.statsService.getRankings(
-      by === 'favorite' ? 'favorite' : 'play',
-    );
-  }
-
-  private normalizeType(type?: string): RankingType {
-    if (type === 'single' || type === 'clip' || type === 'combined') {
-      return type;
-    }
-    return 'combined';
+    return this.statsService.getRanking(r);
   }
 
   private normalizeRanking(ranking?: string): RankingKind {

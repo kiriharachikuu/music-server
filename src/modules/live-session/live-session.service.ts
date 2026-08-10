@@ -624,6 +624,17 @@ export class LiveSessionService {
   async adminClipCreate(dto: any) {
     const { artistIds, ...rest } = dto;
     return this.prisma.$transaction(async (tx) => {
+      // 若未传入自定义 coverUrl，则自动继承所属场次的 cover
+      if (!rest.coverUrl || (typeof rest.coverUrl === 'string' && rest.coverUrl.trim() === '')) {
+        const session = await tx.liveSession.findUnique({
+          where: { id: dto.sessionId },
+          select: { cover: true },
+        });
+        if (session?.cover) {
+          rest.coverUrl = session.cover;
+        }
+      }
+
       // 优先用 artistIds 派生 artist 显示字符串
       let artistDisplay: string | undefined = undefined;
       if (artistIds?.length) {
@@ -658,10 +669,19 @@ export class LiveSessionService {
 
   /** Admin：编辑歌切 */
   async adminClipUpdate(id: string, dto: any) {
-    const old = await this.prisma.liveClip.findUnique({ where: { id } });
+    const old = await this.prisma.liveClip.findUnique({
+      where: { id },
+      include: { session: { select: { cover: true } } },
+    });
     if (!old) throw new NotFoundException('歌切不存在');
 
     const { artistIds, ...rest } = dto;
+
+    // 若未传入自定义 coverUrl（admin 清空封面时也会传空串），则回退到所属场次的 cover
+    if (!rest.coverUrl || (typeof rest.coverUrl === 'string' && rest.coverUrl.trim() === '')) {
+      rest.coverUrl = old.session?.cover ?? null;
+    }
+
     return this.prisma.$transaction(async (tx) => {
       // 关联艺人全量替换 + 派生 artist 显示字段
       let artistDisplay: string | undefined = undefined;
