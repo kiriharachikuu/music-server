@@ -137,11 +137,31 @@ export class UserService {
         skip,
         take,
         orderBy: { createdAt: 'desc' },
-        include: { song: { include: { album: true } } },
+        include: {
+          song: {
+            include: {
+              album: true,
+              songArtists: {
+                take: 1,
+                orderBy: { sort: 'asc' },
+                include: { artist: { select: { id: true } } },
+              },
+            },
+          },
+        },
       }),
       this.prisma.favorite.count({ where }),
     ]);
-    return buildPaginatedResult(list, total, page, limit);
+    const mapped = list.map((fav) => ({
+      ...fav,
+      song: fav.song
+        ? {
+            ...fav.song,
+            artistId: fav.song.songArtists?.[0]?.artistId ?? null,
+          }
+        : fav.song,
+    }));
+    return buildPaginatedResult(mapped, total, page, limit);
   }
 
   /** 切换收藏状态：已收藏则取消，未收藏则新增，同步维护 favoriteCount */
@@ -407,11 +427,31 @@ export class UserService {
         skip,
         take,
         orderBy: { playTime: 'desc' },
-        include: { song: { include: { album: true } } },
+        include: {
+          song: {
+            include: {
+              album: true,
+              songArtists: {
+                take: 1,
+                orderBy: { sort: 'asc' },
+                include: { artist: { select: { id: true } } },
+              },
+            },
+          },
+        },
       }),
       this.prisma.playHistory.count({ where }),
     ]);
-    return buildPaginatedResult(list, total, page, limit);
+    const mapped = list.map((h) => ({
+      ...h,
+      song: h.song
+        ? {
+            ...h.song,
+            artistId: h.song.songArtists?.[0]?.artistId ?? null,
+          }
+        : h.song,
+    }));
+    return buildPaginatedResult(mapped, total, page, limit);
   }
 
   /** 删除单条播放历史（按歌曲 ID，删除最近一条） */
@@ -437,15 +477,57 @@ export class UserService {
   }
 
   /**
-   * 上报播放记录，24小时内同一用户同一首歌只计一次播放量，同时清理超出限制的历史记录
+   * 上报播放记录，24小时内同一用户同一首歌/歌切只计一次播放量，同时清理超出限制的历史记录
+   *
+   * 支持 songId（单曲）或 clipId（歌切），至少二选一。
    *
    * 安全要点：recentPlay 查询置于事务内，避免事务外查询与事务内写入之间的
    * TOCTOU 竞态（旧实现下两个并发请求可能都判定为"未在 24h 内"而重复计数）
    */
   async recordHistory(
     userId: string,
-    songId: string,
+    payload: { songId?: string; clipId?: string },
   ): Promise<{ recorded: true }> {
+    const { songId, clipId } = payload;
+    if (!songId && !clipId) {
+      throw new BadRequestException('songId 和 clipId 至少需要传入一个');
+    }
+
+    // 歌切：仅记录历史，不更新 plays 字段（LiveClip 模型无 plays 字段）
+    if (clipId && !songId) {
+      const clip = await this.prisma.liveClip.findFirst({
+        where: { id: clipId, status: 'PUBLISHED' },
+      });
+      if (!clip) {
+        throw new NotFoundException('歌切不存在或未发布');
+      }
+      const now = new Date();
+      const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+      await this.prisma.$transaction(async (tx) => {
+        const recentPlay = await tx.playHistory.findFirst({
+          where: {
+            userId,
+            clipId,
+            playTime: { gte: oneDayAgo },
+          },
+        });
+        if (recentPlay) {
+          await tx.playHistory.update({
+            where: { id: recentPlay.id },
+            data: { playTime: now },
+          });
+        } else {
+          await tx.playHistory.create({
+            data: { userId, clipId, playTime: now },
+          });
+        }
+        await this.cleanupExcessHistory(tx, userId);
+      });
+      return { recorded: true };
+    }
+
+    // 单曲：原逻辑（24h 去重 + plays +1）
     const song = await this.prisma.song.findFirst({
       where: { id: songId, deletedAt: null },
     });
@@ -529,11 +611,30 @@ export class UserService {
         skip,
         take,
         orderBy: { createdAt: 'desc' },
-        include: { song: true },
+        include: {
+          song: {
+            include: {
+              songArtists: {
+                take: 1,
+                orderBy: { sort: 'asc' },
+                include: { artist: { select: { id: true } } },
+              },
+            },
+          },
+        },
       }),
       this.prisma.downloadRecord.count({ where }),
     ]);
-    return buildPaginatedResult(list, total, page, limit);
+    const mapped = list.map((d) => ({
+      ...d,
+      song: d.song
+        ? {
+            ...d.song,
+            artistId: d.song.songArtists?.[0]?.artistId ?? null,
+          }
+        : d.song,
+    }));
+    return buildPaginatedResult(mapped, total, page, limit);
   }
 
   /** 校验歌单归属当前用户，返回未软删除的歌单 */

@@ -374,14 +374,17 @@ export class UserController {
     return this.userService.getHistory(userId, { page, limit, pageSize });
   }
 
-  /** POST /api/user/history 上报播放记录 */
+  /** POST /api/user/history 上报播放记录（支持 songId 或 clipId） */
   @Post('history')
   @HttpCode(HttpStatus.OK)
   recordHistory(
     @CurrentUser('id') userId: string,
     @Body() dto: RecordHistoryDto,
   ) {
-    return this.userService.recordHistory(userId, dto.songId);
+    return this.userService.recordHistory(userId, {
+      songId: dto.songId,
+      clipId: dto.clipId,
+    });
   }
 
   /** DELETE /api/user/history/:songId 删除单条播放历史 */

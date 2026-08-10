@@ -52,7 +52,16 @@ export class PlaylistService {
           },
           orderBy: { sort: 'asc' },
           include: {
-            song: { include: { album: true } },
+            song: {
+              include: {
+                album: true,
+                songArtists: {
+                  take: 1,
+                  orderBy: { sort: 'asc' },
+                  include: { artist: { select: { id: true } } },
+                },
+              },
+            },
             clip: { include: { session: true } },
           },
         },
@@ -61,12 +70,29 @@ export class PlaylistService {
     if (!playlist) {
       throw new NotFoundException('歌单不存在或不可见');
     }
-    return playlist;
+    // 为每个歌曲添加 artistId
+    return {
+      ...playlist,
+      playlistSongs: playlist.playlistSongs.map((ps) => ({
+        ...ps,
+        song: ps.song
+          ? {
+              ...ps.song,
+              artistId: ps.song.songArtists?.[0]?.artistId ?? null,
+            }
+          : ps.song,
+      })),
+    };
   }
 
   /** 歌单下的歌曲/歌切列表（扁平数组，按 sort 升序） */
   async getSongs(id: string) {
     const playlist = await this.getDetail(id);
-    return playlist.playlistSongs.map((ps) => ps.song ?? ps.clip);
+    return playlist.playlistSongs.map((ps) => {
+      if (ps.song) {
+        return { ...ps.song, artistId: ps.song.artistId ?? ps.song.songArtists?.[0]?.artistId ?? null };
+      }
+      return ps.clip;
+    });
   }
 }

@@ -4,6 +4,8 @@ import {
   IsNotEmpty,
   IsInt,
   IsEnum,
+  IsArray,
+  ArrayMaxSize,
 } from 'class-validator';
 import { SongStatus } from '@prisma/client';
 
@@ -12,9 +14,15 @@ export class CreateLiveClipDto {
   @IsNotEmpty({ message: '歌曲标题不能为空' })
   title: string;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty({ message: '歌手名称不能为空' })
-  artist: string;
+  artist?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10, { message: '关联艺人数量不能超过 10 个' })
+  @IsString({ each: true })
+  artistIds?: string[];
 
   @IsString()
   @IsNotEmpty({ message: '所属场次不能为空' })
@@ -51,6 +59,12 @@ export class UpdateLiveClipDto {
   @IsOptional()
   @IsString()
   artist?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10, { message: '关联艺人数量不能超过 10 个' })
+  @IsString({ each: true })
+  artistIds?: string[];
 
   @IsOptional()
   @IsString()

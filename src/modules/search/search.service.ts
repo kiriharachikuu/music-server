@@ -5,6 +5,8 @@ import {
   parsePagination,
   type PaginatedResult,
 } from '../../common/utils/pagination.util';
+import { toPinyinInitials } from './pinyin.util';
+import { expandQuery, type SearchQuery } from './query-expander';
 
 export interface SongWithAlbum {
   id: string;
@@ -15,15 +17,22 @@ export interface SongWithAlbum {
   fileUrl: string;
   albumName?: string;
   album: { id: string; name: string } | null;
+  artistId?: string | null;
 }
+
+type SortMode = 'relevance' | 'plays' | 'time' | 'time_asc';
 
 @Injectable()
 export class SearchService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * 综合搜索：歌曲（分页） + 专辑（前20） + 歌单（前20）
-   * 支持日期范围过滤：startDate 和 endDate（格式：YYYY-MM-DD）
+   * 综合搜索：歌曲（分页） + 专辑（前20） + 歌单（前20） + 艺人（前20） + 直播歌切（前10） + 直播场次（前10）
+   * 支持：
+   *   - 同义词扩展（SearchSynonym 表）
+   *   - 拼音首字母匹配（tiny-pinyin）
+   *   - 相关度打分（默认按相关度排序；可指定 sort=plays|time|time_asc）
+   *   - 日期范围过滤：startDate / endDate（YYYY-MM-DD）
    */
   async search(query: {
     q?: string;
@@ -55,8 +64,16 @@ export class SearchService {
     // 记录搜索词到 SearchLog（fire-and-forget，用于热门搜索词统计）
     void this.recordSearchKeyword(q, query.ip);
 
+    // 1) 展开查询：原文 + 同义词 + 拼音首字母
+    const searchQuery = await expandQuery(this.prisma, q);
+    // 用于 OR-contains 的去重 term 列表
+    const terms = this.uniqueTerms(searchQuery);
+    // 排序模式（默认 relevance）
+    const sort = this.parseSortMode(query.sort);
+
     const dateFilter = this.buildDateFilter(startDate, endDate);
 
+    // 2) 歌曲查询：把所有 term 拼到一个 OR 子句里
     const songWhere = {
       deletedAt: null,
       status: 'PUBLISHED' as const,
@@ -69,15 +86,12 @@ export class SearchService {
             some: { playlist: { name: { contains: q } } },
           },
         },
+        // 同义词 / 拼音：每个 term 都尝试匹配 title / artist / album.name
+        ...this.buildSongTermClauses(terms, q),
       ],
       ...(tag ? { songTags: { some: { tag: { name: tag } } } } : {}),
       ...dateFilter,
     };
-
-    const orderBy =
-      query.sort === 'plays'
-        ? { plays: 'desc' as const }
-        : { releaseDate: 'desc' as const };
 
     const pagination = parsePagination(query);
 
@@ -86,6 +100,7 @@ export class SearchService {
       OR: [
         { title: { contains: q } },
         { artist: { contains: q } },
+        ...this.buildLiveClipTermClauses(terms, q),
       ],
     };
 
@@ -95,17 +110,37 @@ export class SearchService {
       OR: [
         { title: { contains: q } },
         { artist: { contains: q } },
+        ...this.buildLiveClipTermClauses(terms, q),
       ],
     };
+
+    // 3) 并发拉取全部子模块；歌曲/歌切数量大，先拉够再做打分排序
+    //    orderBy：相关度排序在内存里做（不传 orderBy 让 Prisma 不参与排序）；
+    //    sort=plays / time / time_asc 仍然走 Prisma 的索引排序以保证性能。
+    const songOrderBy =
+      sort === 'plays'
+        ? { plays: 'desc' as const }
+        : sort === 'time'
+          ? { releaseDate: 'desc' as const }
+          : sort === 'time_asc'
+            ? { releaseDate: 'asc' as const }
+            : undefined;
 
     const [songTotal, songs, albums, playlists, dbArtists, liveClips, liveSessions] = await Promise.all([
       this.prisma.song.count({ where: songWhere }),
       this.prisma.song.findMany({
         where: songWhere,
-        orderBy,
+        ...(songOrderBy ? { orderBy: songOrderBy } : {}),
         skip: pagination.skip,
         take: pagination.take,
-        include: { album: { select: { id: true, name: true } } },
+        include: {
+          album: { select: { id: true, name: true } },
+          songArtists: {
+            take: 1,
+            orderBy: { sort: 'asc' },
+            include: { artist: { select: { id: true } } },
+          },
+        },
       }),
       this.prisma.album.findMany({
         where: {
@@ -113,6 +148,7 @@ export class SearchService {
           OR: [
             { name: { contains: q } },
             { artist: { contains: q } },
+            ...this.buildAlbumTermClauses(terms, q),
           ],
         },
         take: 20,
@@ -121,7 +157,10 @@ export class SearchService {
         where: {
           deletedAt: null,
           isPublic: true,
-          name: { contains: q },
+          OR: [
+            { name: { contains: q } },
+            ...this.buildPlaylistTermClauses(terms, q),
+          ],
         },
         orderBy: [
           { isSystem: 'desc' },
@@ -135,7 +174,10 @@ export class SearchService {
       this.prisma.artist.findMany({
         where: {
           deletedAt: null,
-          name: { contains: q },
+          OR: [
+            { name: { contains: q } },
+            ...this.buildArtistTermClauses(terms, q),
+          ],
         },
         take: 20,
         select: { id: true, name: true, avatar: true },
@@ -155,9 +197,13 @@ export class SearchService {
       }),
     ]);
 
-    const mappedSongs = songs.map((song) => ({
+    // 4) 内存打分 + 相关度排序（仅对 songs；其它子模块保持原样）
+    const scoredSongs = this.scoreAndSortSongs(songs, searchQuery, sort);
+
+    const mappedSongs = scoredSongs.map((song) => ({
       ...song,
       albumName: song.album?.name,
+      artistId: song.songArtists?.[0]?.artistId ?? null,
     })) as unknown as SongWithAlbum[];
 
     let artists: Array<{
@@ -241,6 +287,8 @@ export class SearchService {
   /**
    * 带分类的搜索：支持按 category 筛选特定类型结果
    * category: 'live_clips' | 'live_sessions'
+   *
+   * 同样集成同义词 + 拼音首字母扩展。
    */
   async searchByCategory(query: {
     q?: string;
@@ -259,12 +307,17 @@ export class SearchService {
       };
     }
 
+    // 展开 term
+    const searchQuery = await expandQuery(this.prisma, q);
+    const terms = this.uniqueTerms(searchQuery);
+
     if (query.category === 'live_clips') {
       const where: any = {
         status: 'PUBLISHED',
         OR: [
           { title: { contains: q } },
           { artist: { contains: q } },
+          ...this.buildLiveClipTermClauses(terms, q),
         ],
       };
       const [list, total] = await this.prisma.$transaction([
@@ -306,6 +359,7 @@ export class SearchService {
         OR: [
           { title: { contains: q } },
           { artist: { contains: q } },
+          ...this.buildLiveClipTermClauses(terms, q),
         ],
       };
       const [list, total] = await this.prisma.$transaction([
@@ -327,6 +381,173 @@ export class SearchService {
       liveClips: buildPaginatedResult([], 0, 1, 20),
       liveSessions: buildPaginatedResult([], 0, 1, 20),
     };
+  }
+
+  /**
+   * 解析 sort 参数到合法 SortMode，无效值回退为 relevance
+   */
+  private parseSortMode(raw?: string): SortMode {
+    switch (raw) {
+      case 'plays':
+        return 'plays';
+      case 'time':
+        return 'time';
+      case 'time_asc':
+        return 'time_asc';
+      case 'relevance':
+      default:
+        return 'relevance';
+    }
+  }
+
+  /**
+   * 拼出 terms 中除 raw 外的其它 term，每个 term 生成 title/artist/album 三个 contains 子句
+   * （q 本身已经被前几个 OR 单独覆盖；这里只补同义词 / 拼音 的匹配）
+   */
+  private buildSongTermClauses(terms: string[], q: string) {
+    const clauses: Array<Record<string, unknown>> = [];
+    for (const term of terms) {
+      if (term === q.toLowerCase()) continue;
+      clauses.push({ title: { contains: term } });
+      clauses.push({ artist: { contains: term } });
+      clauses.push({ album: { name: { contains: term } } });
+    }
+    return clauses;
+  }
+
+  private buildAlbumTermClauses(terms: string[], q: string) {
+    const clauses: Array<Record<string, unknown>> = [];
+    for (const term of terms) {
+      if (term === q.toLowerCase()) continue;
+      clauses.push({ name: { contains: term } });
+      clauses.push({ artist: { contains: term } });
+    }
+    return clauses;
+  }
+
+  private buildPlaylistTermClauses(terms: string[], q: string) {
+    const clauses: Array<Record<string, unknown>> = [];
+    for (const term of terms) {
+      if (term === q.toLowerCase()) continue;
+      clauses.push({ name: { contains: term } });
+    }
+    return clauses;
+  }
+
+  private buildArtistTermClauses(terms: string[], q: string) {
+    const clauses: Array<Record<string, unknown>> = [];
+    for (const term of terms) {
+      if (term === q.toLowerCase()) continue;
+      clauses.push({ name: { contains: term } });
+    }
+    return clauses;
+  }
+
+  private buildLiveClipTermClauses(terms: string[], q: string) {
+    const clauses: Array<Record<string, unknown>> = [];
+    for (const term of terms) {
+      if (term === q.toLowerCase()) continue;
+      clauses.push({ title: { contains: term } });
+      clauses.push({ artist: { contains: term } });
+    }
+    return clauses;
+  }
+
+  /**
+   * 把 raw + synonyms 合并去重，pinyin 单独追加（如果和 raw 相同则跳过）
+   */
+  private uniqueTerms(query: SearchQuery): string[] {
+    const set = new Set<string>();
+    if (query.raw) set.add(query.raw);
+    for (const s of query.synonyms) {
+      if (s) set.add(s.toLowerCase());
+    }
+    return Array.from(set);
+  }
+
+  /**
+   * 给一组 song 算相关度得分，并按当前 sort 模式排序
+   *  - relevance（默认）：按 score 降序
+   *  - plays / time / time_asc：Prisma 已经按这个排序，但 score 仍会被计算以便后续扩展
+   *
+   * 评分规则（每条记录取最高得分匹配，避免重复加分）：
+   *   标题命中（raw  包含）          +4
+   *   艺人命中（raw  包含）          +3
+   *   专辑命中（raw  包含）          +2
+   *   标题命中（同义词 包含）        +4 * 0.8
+   *   艺人命中（同义词 包含）        +3 * 0.8
+   *   专辑命中（同义词 包含）        +2 * 0.8
+   *   标题拼音首字母 startsWith q.pinyin  +4 * 0.6
+   *   艺人拼音首字母 startsWith q.pinyin  +3 * 0.6
+   */
+  private scoreAndSortSongs<
+    T extends {
+      id: string;
+      title: string;
+      artist: string;
+      album?: { name: string } | null;
+      plays: number;
+      releaseDate: Date;
+    },
+  >(songs: T[], query: SearchQuery, sort: SortMode): Array<T & { score: number }> {
+    const synonyms = query.synonyms;
+    const pinyin = query.pinyin;
+    const raw = query.raw;
+
+    const scored = songs.map((song) => {
+      let score = 0;
+      const title = (song.title ?? '').toLowerCase();
+      const artist = (song.artist ?? '').toLowerCase();
+      const albumName = (song.album?.name ?? '').toLowerCase();
+
+      if (raw) {
+        if (title.includes(raw)) score += 4;
+        if (artist.includes(raw)) score += 3;
+        if (albumName.includes(raw)) score += 2;
+      }
+
+      // 同义词命中（按该同义词"是否被 raw 直接包含"判断去重，避免同义词与 raw 重复加分）
+      for (const term of synonyms) {
+        if (!term || term === raw || term === pinyin) continue;
+        if (title.includes(term)) score += 4 * 0.8;
+        if (artist.includes(term)) score += 3 * 0.8;
+        if (albumName.includes(term)) score += 2 * 0.8;
+      }
+
+      // 拼音首字母前缀匹配（仅在 raw 是字母组合时启用，避免中文输入误伤）
+      if (pinyin && /^[a-z]/.test(pinyin)) {
+        const titlePy = toPinyinInitials(song.title ?? '');
+        const artistPy = toPinyinInitials(song.artist ?? '');
+        if (titlePy.startsWith(pinyin)) score += 4 * 0.6;
+        else if (titlePy.includes(pinyin)) score += 4 * 0.3;
+        if (artistPy.startsWith(pinyin)) score += 3 * 0.6;
+        else if (artistPy.includes(pinyin)) score += 3 * 0.3;
+      }
+
+      return Object.assign({}, song, { score });
+    });
+
+    if (sort === 'relevance') {
+      scored.sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        // 兜底：分数相同时按播放量
+        return b.plays - a.plays;
+      });
+    } else if (sort === 'plays') {
+      scored.sort((a, b) => b.plays - a.plays);
+    } else if (sort === 'time') {
+      scored.sort(
+        (a, b) =>
+          new Date(b.releaseDate).getTime() - new Date(a.releaseDate).getTime(),
+      );
+    } else if (sort === 'time_asc') {
+      scored.sort(
+        (a, b) =>
+          new Date(a.releaseDate).getTime() - new Date(b.releaseDate).getTime(),
+      );
+    }
+
+    return scored;
   }
 
   /**
@@ -429,4 +650,3 @@ export class SearchService {
     }
   }
 }
-

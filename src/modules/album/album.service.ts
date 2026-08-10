@@ -41,12 +41,26 @@ export class AlbumService {
         songs: {
           where: { deletedAt: null },
           orderBy: { releaseDate: 'asc' },
+          include: {
+            songArtists: {
+              take: 1,
+              orderBy: { sort: 'asc' },
+              include: { artist: { select: { id: true } } },
+            },
+          },
         },
       },
     });
     if (!album) {
       throw new NotFoundException('专辑不存在');
     }
-    return album;
+    // 为每个歌曲添加 artistId
+    return {
+      ...album,
+      songs: album.songs.map((song) => ({
+        ...song,
+        artistId: song.songArtists?.[0]?.artistId ?? null,
+      })),
+    };
   }
 }

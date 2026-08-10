@@ -77,6 +77,25 @@ export class LiveSessionService {
     return out.join(ARTIST_JOIN);
   }
 
+  /**
+   * 根据 artistIds 拼接展示字符串（按 sort 顺序），与 normalizeArtistField
+   * 默认使用的全角连接符保持一致（ARTIST_JOIN = '＆'）。
+   */
+  private async buildArtistDisplayFromIds(
+    tx: Prisma.TransactionClient,
+    artistIds: string[],
+  ): Promise<string> {
+    const artists = await tx.artist.findMany({
+      where: { id: { in: artistIds } },
+      select: { id: true, name: true },
+    });
+    const map = new Map(artists.map((a) => [a.id, a.name]));
+    return artistIds
+      .map((id) => map.get(id))
+      .filter((n): n is string => !!n)
+      .join(ARTIST_JOIN);
+  }
+
   /** 公开：获取已发布场次列表（分页，按直播时间排序） */
   async list(query: { page?: string; limit?: string; pageSize?: string; sort?: string }) {
     const { page, limit, skip, take } = parsePagination(query);
@@ -92,6 +111,12 @@ export class LiveSessionService {
         orderBy,
         skip,
         take,
+        include: {
+          liveSessionArtists: {
+            include: { artist: { select: { id: true, name: true } } },
+            orderBy: { sort: 'asc' },
+          },
+        },
       }),
       this.prisma.liveSession.count({ where }),
     ]);
@@ -119,6 +144,10 @@ export class LiveSessionService {
         ],
         include: {
           session: { select: { id: true, title: true, liveTime: true, cover: true } },
+          liveClipArtists: {
+            include: { artist: { select: { id: true, name: true } } },
+            orderBy: { sort: 'asc' },
+          },
         },
         skip,
         take,
@@ -138,6 +167,7 @@ export class LiveSessionService {
       sessionName: clip.session?.title ?? '',
       liveTime: clip.session?.liveTime?.toISOString() ?? '',
       trackIndex: clip.trackIndex,
+      liveClipArtists: clip.liveClipArtists,
     }));
 
     return buildPaginatedResult(mapped, total, page, limit);
@@ -148,6 +178,10 @@ export class LiveSessionService {
     const session = await this.prisma.liveSession.findFirst({
       where: { id, deletedAt: null },
       include: {
+        liveSessionArtists: {
+          include: { artist: { select: { id: true, name: true } } },
+          orderBy: { sort: 'asc' },
+        },
         clips: {
           where: { status: 'PUBLISHED' },
           orderBy: { trackIndex: 'asc' },
@@ -245,6 +279,10 @@ export class LiveSessionService {
         session: {
           include: {
             _count: { select: { clips: { where: { status: 'PUBLISHED' } } } },
+            liveSessionArtists: {
+              include: { artist: { select: { id: true, name: true } } },
+              orderBy: { sort: 'asc' },
+            },
           },
         },
       },
@@ -317,6 +355,10 @@ export class LiveSessionService {
         clip: {
           include: {
             session: { select: { id: true, title: true, liveTime: true, cover: true } },
+            liveClipArtists: {
+              include: { artist: { select: { id: true, name: true } } },
+              orderBy: { sort: 'asc' },
+            },
           },
         },
       },
@@ -339,6 +381,7 @@ export class LiveSessionService {
         sessionCover: clip.session?.cover ?? null,
         liveTime: clip.session?.liveTime?.toISOString() ?? '',
         trackIndex: clip.trackIndex,
+        liveClipArtists: clip.liveClipArtists,
       };
     });
   }
@@ -365,6 +408,12 @@ export class LiveSessionService {
         orderBy: { liveTime: 'desc' },
         skip,
         take,
+        include: {
+          liveSessionArtists: {
+            include: { artist: { select: { id: true, name: true } } },
+            orderBy: { sort: 'asc' },
+          },
+        },
       }),
       this.prisma.liveSession.count({ where: finalWhere }),
     ]);
@@ -376,8 +425,18 @@ export class LiveSessionService {
     const session = await this.prisma.liveSession.findFirst({
       where: { id, deletedAt: null },
       include: {
+        liveSessionArtists: {
+          include: { artist: { select: { id: true, name: true } } },
+          orderBy: { sort: 'asc' },
+        },
         clips: {
           orderBy: { trackIndex: 'asc' },
+          include: {
+            liveClipArtists: {
+              include: { artist: { select: { id: true, name: true } } },
+              orderBy: { sort: 'asc' },
+            },
+          },
         },
       },
     });
@@ -387,17 +446,69 @@ export class LiveSessionService {
 
   /** Admin：新增场次 */
   async adminCreate(dto: any) {
-    if (dto?.artist !== undefined)
-      dto.artist = await this.normalizeArtistField(dto.artist);
-    return this.prisma.liveSession.create({ data: dto });
+    const { artistIds, ...rest } = dto;
+    return this.prisma.$transaction(async (tx) => {
+      // 优先用 artistIds 派生 artist 显示字符串
+      let artistDisplay: string | undefined = undefined;
+      if (artistIds?.length) {
+        artistDisplay = await this.buildArtistDisplayFromIds(tx, artistIds);
+      } else if (rest.artist !== undefined) {
+        artistDisplay = await this.normalizeArtistField(rest.artist);
+      }
+
+      const session = await tx.liveSession.create({
+        data: {
+          ...rest,
+          ...(artistDisplay !== undefined ? { artist: artistDisplay } : {}),
+          ...(artistIds?.length
+            ? {
+                liveSessionArtists: {
+                  create: artistIds.map((artistId: string, index: number) => ({
+                    artistId,
+                    sort: index,
+                  })),
+                },
+              }
+            : {}),
+        },
+      });
+      return session;
+    });
   }
 
   /** Admin：编辑场次 */
   async adminUpdate(id: string, dto: any) {
-    if (dto?.artist !== undefined)
-      dto.artist = await this.normalizeArtistField(dto.artist);
-    await this.prisma.liveSession.update({ where: { id }, data: dto });
-    return this.adminFindOne(id);
+    const { artistIds, ...rest } = dto;
+    return this.prisma.$transaction(async (tx) => {
+      // 关联艺人全量替换 + 派生 artist 显示字段
+      let artistDisplay: string | undefined = undefined;
+      if (artistIds !== undefined) {
+        await tx.liveSessionArtist.deleteMany({ where: { sessionId: id } });
+        if (artistIds.length) {
+          await tx.liveSessionArtist.createMany({
+            data: artistIds.map((artistId: string, index: number) => ({
+              sessionId: id,
+              artistId,
+              sort: index,
+            })),
+          });
+          artistDisplay = await this.buildArtistDisplayFromIds(tx, artistIds);
+        } else {
+          artistDisplay = '';
+        }
+      } else if (rest.artist !== undefined) {
+        artistDisplay = await this.normalizeArtistField(rest.artist);
+      }
+
+      await tx.liveSession.update({
+        where: { id },
+        data: {
+          ...rest,
+          ...(artistDisplay !== undefined ? { artist: artistDisplay } : {}),
+        },
+      });
+      return this.adminFindOne(id);
+    });
   }
 
   /** Admin：软删除场次 + 级联软删除所有歌切 + 清除收藏 */
@@ -470,6 +581,10 @@ export class LiveSessionService {
         orderBy: [{ sessionId: 'asc' }, { trackIndex: 'asc' }],
         include: {
           session: { select: { id: true, title: true, liveTime: true, cover: true } },
+          liveClipArtists: {
+            include: { artist: { select: { id: true, name: true } } },
+            orderBy: { sort: 'asc' },
+          },
         },
         skip,
         take,
@@ -491,6 +606,10 @@ export class LiveSessionService {
       where: { id },
       include: {
         session: { select: { id: true, title: true, liveTime: true, cover: true } },
+        liveClipArtists: {
+          include: { artist: { select: { id: true, name: true } } },
+          orderBy: { sort: 'asc' },
+        },
       },
     });
     if (!clip) throw new NotFoundException('歌切不存在');
@@ -503,28 +622,74 @@ export class LiveSessionService {
 
   /** Admin：新增歌切 + 同步更新场次 songCount */
   async adminClipCreate(dto: any) {
-    if (dto?.artist !== undefined)
-      dto.artist = await this.normalizeArtistField(dto.artist);
-    const clip = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.liveClip.create({ data: dto });
+    const { artistIds, ...rest } = dto;
+    return this.prisma.$transaction(async (tx) => {
+      // 优先用 artistIds 派生 artist 显示字符串
+      let artistDisplay: string | undefined = undefined;
+      if (artistIds?.length) {
+        artistDisplay = await this.buildArtistDisplayFromIds(tx, artistIds);
+      } else if (rest.artist !== undefined) {
+        artistDisplay = await this.normalizeArtistField(rest.artist);
+      }
+
+      const created = await tx.liveClip.create({
+        data: {
+          ...rest,
+          ...(artistDisplay !== undefined ? { artist: artistDisplay } : {}),
+          ...(artistIds?.length
+            ? {
+                liveClipArtists: {
+                  create: artistIds.map((artistId: string, index: number) => ({
+                    artistId,
+                    sort: index,
+                  })),
+                },
+              }
+            : {}),
+        },
+      });
       await tx.liveSession.update({
         where: { id: dto.sessionId },
         data: { songCount: { increment: 1 } },
       });
       return created;
     });
-    return clip;
   }
 
   /** Admin：编辑歌切 */
   async adminClipUpdate(id: string, dto: any) {
     const old = await this.prisma.liveClip.findUnique({ where: { id } });
     if (!old) throw new NotFoundException('歌切不存在');
-    if (dto?.artist !== undefined)
-      dto.artist = await this.normalizeArtistField(dto.artist);
 
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const clip = await tx.liveClip.update({ where: { id }, data: dto });
+    const { artistIds, ...rest } = dto;
+    return this.prisma.$transaction(async (tx) => {
+      // 关联艺人全量替换 + 派生 artist 显示字段
+      let artistDisplay: string | undefined = undefined;
+      if (artistIds !== undefined) {
+        await tx.liveClipArtist.deleteMany({ where: { clipId: id } });
+        if (artistIds.length) {
+          await tx.liveClipArtist.createMany({
+            data: artistIds.map((artistId: string, index: number) => ({
+              clipId: id,
+              artistId,
+              sort: index,
+            })),
+          });
+          artistDisplay = await this.buildArtistDisplayFromIds(tx, artistIds);
+        } else {
+          artistDisplay = '';
+        }
+      } else if (rest.artist !== undefined) {
+        artistDisplay = await this.normalizeArtistField(rest.artist);
+      }
+
+      const clip = await tx.liveClip.update({
+        where: { id },
+        data: {
+          ...rest,
+          ...(artistDisplay !== undefined ? { artist: artistDisplay } : {}),
+        },
+      });
       // 如果更换了场次，同步两边的 songCount
       if (dto.sessionId && dto.sessionId !== old.sessionId) {
         await tx.liveSession.update({
@@ -538,7 +703,6 @@ export class LiveSessionService {
       }
       return clip;
     });
-    return updated;
   }
 
   /** Admin：物理删除歌切 + 同步更新场次 songCount */

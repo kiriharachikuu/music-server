@@ -43,12 +43,24 @@ export class SongService {
         orderBy,
         skip,
         take,
-        include: { album: true },
+        include: {
+          album: true,
+          songArtists: {
+            take: 1,
+            orderBy: { sort: 'asc' },
+            include: { artist: { select: { id: true } } },
+          },
+        },
       }),
       this.prisma.song.count({ where }),
     ]);
 
-    return buildPaginatedResult(list, total, page, limit);
+    const mapped = list.map((song) => ({
+      ...song,
+      artistId: song.songArtists?.[0]?.artistId ?? null,
+    }));
+
+    return buildPaginatedResult(mapped, total, page, limit);
   }
 
   /** 歌曲详情：包含专辑与标签 */
@@ -58,12 +70,20 @@ export class SongService {
       include: {
         album: true,
         songTags: { include: { tag: true } },
+        songArtists: {
+          take: 1,
+          orderBy: { sort: 'asc' },
+          include: { artist: { select: { id: true } } },
+        },
       },
     });
     if (!song) {
       throw new NotFoundException('歌曲不存在');
     }
-    return song;
+    return {
+      ...song,
+      artistId: song.songArtists?.[0]?.artistId ?? null,
+    };
   }
 
   /**

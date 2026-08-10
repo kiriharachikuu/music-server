@@ -5,6 +5,8 @@ import {
   IsInt,
   IsEnum,
   IsDateString,
+  IsArray,
+  ArrayMaxSize,
 } from 'class-validator';
 import { SongStatus } from '@prisma/client';
 
@@ -13,9 +15,15 @@ export class CreateLiveSessionDto {
   @IsNotEmpty({ message: '场次标题不能为空' })
   title: string;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty({ message: '歌手/主播名称不能为空' })
-  artist: string;
+  artist?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10, { message: '关联艺人数量不能超过 10 个' })
+  @IsString({ each: true })
+  artistIds?: string[];
 
   @IsOptional()
   @IsString()
@@ -45,6 +53,12 @@ export class UpdateLiveSessionDto {
   @IsOptional()
   @IsString()
   artist?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10, { message: '关联艺人数量不能超过 10 个' })
+  @IsString({ each: true })
+  artistIds?: string[];
 
   @IsOptional()
   @IsString()

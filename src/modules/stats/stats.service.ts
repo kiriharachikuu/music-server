@@ -2,6 +2,17 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { HotRankingService } from './hot-ranking.service';
 import { SoarRankingService } from './soar-ranking.service';
+import { NewRankingService } from './new-ranking.service';
+import {
+  RankingItem,
+  RankingKind,
+  RankingResponse,
+  RankingType,
+} from './ranking.types';
+import {
+  RANKING_DESCRIPTIONS,
+  RankingPlaylistService,
+} from './ranking-playlist.service';
 
 /**
  * 站点公开设置项白名单
@@ -23,6 +34,8 @@ export class StatsService {
     private readonly prisma: PrismaService,
     private readonly hotRankingService: HotRankingService,
     private readonly soarRankingService: SoarRankingService,
+    private readonly newRankingService: NewRankingService,
+    private readonly rankingPlaylistService: RankingPlaylistService,
   ) {}
 
   /**
@@ -47,14 +60,30 @@ export class StatsService {
         orderBy: { sort: 'asc' },
         take: 8,
         include: {
-          song: { include: { album: true } },
+          song: {
+            include: {
+              album: true,
+              songArtists: {
+                take: 1,
+                orderBy: { sort: 'asc' },
+                include: { artist: { select: { id: true } } },
+              },
+            },
+          },
         },
       }),
       this.prisma.song.findMany({
         where: { deletedAt: null, status: 'PUBLISHED' },
         orderBy: { releaseDate: 'desc' },
         take: 50,
-        include: { album: true },
+        include: {
+          album: true,
+          songArtists: {
+            take: 1,
+            orderBy: { sort: 'asc' },
+            include: { artist: { select: { id: true } } },
+          },
+        },
       }),
       this.prisma.liveClip.findMany({
         where: { status: 'PUBLISHED' },
@@ -68,7 +97,14 @@ export class StatsService {
         where: { deletedAt: null, status: 'PUBLISHED' },
         orderBy: { releaseDate: 'desc' },
         take: 10,
-        include: { album: true },
+        include: {
+          album: true,
+          songArtists: {
+            take: 1,
+            orderBy: { sort: 'asc' },
+            include: { artist: { select: { id: true } } },
+          },
+        },
       }),
       this.prisma.playlist.findMany({
         where: { isPublic: true, deletedAt: null },
@@ -95,9 +131,17 @@ export class StatsService {
 
     return {
       banners,
-      dailySongs: this.shuffle(dailySongsPool).slice(0, 20),
+      dailySongs: this.shuffle(dailySongsPool)
+        .slice(0, 20)
+        .map((song) => ({
+          ...song,
+          artistId: song.songArtists?.[0]?.artistId ?? null,
+        })),
       dailyClips: this.shuffle(this.mapClipsToLiveClipTrack(dailyClipsPool)).slice(0, 20),
-      newSongs,
+      newSongs: newSongs.map((song) => ({
+        ...song,
+        artistId: song.songArtists?.[0]?.artistId ?? null,
+      })),
       featuredPlaylists,
       hotArtists: hotArtists.map((a) => ({
         id: a.id,
@@ -117,9 +161,19 @@ export class StatsService {
       where: { deletedAt: null, status: 'PUBLISHED' },
       orderBy: { releaseDate: 'desc' },
       take: 50,
-      include: { album: true },
+      include: {
+        album: true,
+        songArtists: {
+          take: 1,
+          orderBy: { sort: 'asc' },
+          include: { artist: { select: { id: true } } },
+        },
+      },
     });
-    return this.shuffle(pool).slice(0, limit);
+    return this.shuffle(pool).slice(0, limit).map((song) => ({
+      ...song,
+      artistId: song.songArtists?.[0]?.artistId ?? null,
+    }));
   }
 
   /**
@@ -157,82 +211,75 @@ export class StatsService {
     }));
   }
 
+  // ============ 9 档排行榜 ============
+
   /**
-   * 排行榜
-   * - soar（飙升榜）：对比本周与上周播放增长量，自动排名前 50，每周一更新
-   * - new（新歌榜）：基于官方系统歌单（人工推荐）
-   * - hot（热歌榜）：基于过去 7 天播放量自动排名前 50，每周一更新
-   *
-   * 飙升榜/热歌榜数据来源：定时计算并缓存到 SystemSetting，
-   * 同时同步到对应系统歌单。此处直接读取缓存的歌曲 ID 列表查询详情。
+   * 旧版 API（保持向后兼容）
+   * 返回 { soar, new, hot } 三个数组的旧结构
    */
   async getRankings(_by: 'play' | 'favorite' = 'play') {
-    // 新歌榜：仍从人工推荐的系统歌单读取
-    const systemPlaylists = await this.prisma.playlist.findMany({
-      where: {
-        isSystem: true,
-        deletedAt: null,
-        isPublic: true,
-        name: { contains: '新歌' },
-      },
-      include: {
-        playlistSongs: {
-          where: { song: { deletedAt: null, status: 'PUBLISHED' } },
-          orderBy: { sort: 'asc' },
-          take: 50,
-          include: {
-            song: { include: { album: true } },
-          },
-        },
-      },
-    });
-
-    const result: { soar: any[]; new: any[]; hot: any[] } = {
-      soar: [],
-      new: [],
-      hot: [],
+    const [soar, news, hot] = await Promise.all([
+      this.getRankingsByType('single', 'soar'),
+      this.getRankingsByType('single', 'new'),
+      this.getRankingsByType('single', 'hot'),
+    ]);
+    return {
+      soar: this.stripsItemFields(soar.tracks),
+      new: this.stripsItemFields(news.tracks),
+      hot: this.stripsItemFields(hot.tracks),
     };
+  }
 
-    // 新歌榜：从人工推荐的系统歌单读取
-    if (systemPlaylists.length > 0) {
-      result.new = systemPlaylists[0].playlistSongs.map((ps) => ps.song);
+  /**
+   * 9 档排行榜统一入口
+   * @param type 综合(combined) / 单曲(single) / 歌切(clip)
+   * @param ranking 飙升(soar) / 热歌(hot) / 新歌(new)
+   */
+  async getRankingsByType(
+    type: RankingType = 'combined',
+    ranking: RankingKind = 'soar',
+  ): Promise<RankingResponse> {
+    let items: RankingItem[] = [];
+    if (ranking === 'soar') {
+      items = await this.soarRankingService.getTop(type);
+    } else if (ranking === 'hot') {
+      items = await this.hotRankingService.getTop(type);
+    } else {
+      items = await this.newRankingService.getTop(type);
     }
 
-    // 飙升榜：基于播放增长量自动排名
-    const soarSongIds = await this.soarRankingService.getCachedSongIds();
-    if (soarSongIds.length > 0) {
-      const soarSongs = await this.prisma.song.findMany({
-        where: {
-          id: { in: soarSongIds },
-          deletedAt: null,
-          status: 'PUBLISHED',
-        },
-        include: { album: true },
-      });
-      const songMap = new Map(soarSongs.map((s) => [s.id, s]));
-      result.soar = soarSongIds
-        .map((id) => songMap.get(id))
-        .filter((s): s is NonNullable<typeof s> => !!s);
-    }
+    // 重排 rank（防止缓存中 rank 字段缺失/重复）
+    const tracks = items.map((it, idx) => ({ ...it, rank: idx + 1 }));
 
-    // 热歌榜：基于过去 7 天播放量自动排名
-    const hotSongIds = await this.hotRankingService.getCachedSongIds();
-    if (hotSongIds.length > 0) {
-      const hotSongs = await this.prisma.song.findMany({
-        where: {
-          id: { in: hotSongIds },
-          deletedAt: null,
-          status: 'PUBLISHED',
-        },
-        include: { album: true },
-      });
-      const songMap = new Map(hotSongs.map((s) => [s.id, s]));
-      result.hot = hotSongIds
-        .map((id) => songMap.get(id))
-        .filter((s): s is NonNullable<typeof s> => !!s);
-    }
+    const playlist = await this.rankingPlaylistService.findPlaylist(type, ranking);
 
-    return result;
+    return {
+      type,
+      ranking,
+      title: RankingPlaylistService.nameOf(type, ranking),
+      cover: playlist?.cover ?? tracks[0]?.cover ?? null,
+      description:
+        RANKING_DESCRIPTIONS[`${type}-${ranking}`] ??
+        playlist?.description ??
+        '',
+      tracks,
+      updatedAt: new Date().toISOString(),
+      playlistId: playlist?.id ?? null,
+    };
+  }
+
+  /** 旧版响应需要剥除 trackType/rank 等扩展字段，仅返回原始单曲字段 */
+  private stripsItemFields(items: RankingItem[]): any[] {
+    return items.map((it) => {
+      if (it.trackType === 'song') {
+        // 单曲：去掉 trackType/itemId/cover 多余 alias，保留 Song 原生字段
+        const { trackType, itemId, rank, cover, ...rest } = it;
+        return { ...rest, coverUrl: rest.coverUrl ?? cover };
+      }
+      // 歌切：返回 LiveClip 形状
+      const { trackType, itemId, rank, cover, ...rest } = it;
+      return { ...rest, coverUrl: rest.coverUrl ?? cover };
+    });
   }
 
   /** 站点公开设置项 */

@@ -320,15 +320,18 @@ model PlaylistFavorite {
 model PlayHistory {
   id        String   @id @default(cuid())
   userId    String
-  songId    String
+  songId    String?
+  clipId    String?
   playTime  DateTime
   createdAt DateTime @default(now())
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  song Song @relation(fields: [songId], references: [id], onDelete: Cascade)
+  user User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  song Song?     @relation(fields: [songId], references: [id], onDelete: Cascade)
+  clip LiveClip? @relation(fields: [clipId], references: [id], onDelete: Cascade)
 
   @@index([userId, playTime])
   @@index([songId, playTime])
+  @@index([clipId, playTime])
 }
 
 // 下载记录表
@@ -402,9 +405,11 @@ model Artist {
   updatedAt           DateTime  @updatedAt
   deletedAt           DateTime?
 
-  songArtists  SongArtist[]
-  albumArtists AlbumArtist[]
-  aliases      ArtistAlias[]
+  songArtists        SongArtist[]
+  albumArtists       AlbumArtist[]
+  liveSessionArtists LiveSessionArtist[]
+  liveClipArtists    LiveClipArtist[]
+  aliases            ArtistAlias[]
 
   @@index([name])
   @@index([deletedAt])
@@ -442,6 +447,38 @@ model AlbumArtist {
   @@index([artistId])
 }
 
+// 直播场次-歌手关联表（多对多，与 SongArtist/AlbumArtist 对齐）
+model LiveSessionArtist {
+  id        String   @id @default(cuid())
+  sessionId String
+  artistId  String
+  sort      Int      @default(0)
+  createdAt DateTime @default(now())
+
+  session LiveSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  artist  Artist      @relation(fields: [artistId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, artistId])
+  @@index([sessionId])
+  @@index([artistId])
+}
+
+// 直播歌切-歌手关联表（多对多）
+model LiveClipArtist {
+  id        String   @id @default(cuid())
+  clipId    String
+  artistId  String
+  sort      Int      @default(0)
+  createdAt DateTime @default(now())
+
+  clip   LiveClip @relation(fields: [clipId], references: [id], onDelete: Cascade)
+  artist Artist   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+
+  @@unique([clipId, artistId])
+  @@index([clipId])
+  @@index([artistId])
+}
+
 // 搜索日志表（用于热门搜索词统计，按时间窗口聚合）
 // 不建立 User 外键关联，仅作为日志使用，定期清理
 model SearchLog {
@@ -453,6 +490,19 @@ model SearchLog {
   @@index([keyword])
   @@index([createdAt])
   @@index([ip, createdAt])
+}
+
+// 搜索同义词表
+model SearchSynonym {
+  id        String   @id @default(cuid())
+  keyword   String
+  synonym   String
+  weight    Float    @default(1.0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([keyword, synonym])
+  @@index([keyword])
 }
 
 // ============ 直播歌切功能 ============
@@ -472,8 +522,9 @@ model LiveSession {
   updatedAt     DateTime   @updatedAt
   deletedAt     DateTime?
 
-  clips            LiveClip[]
-  sessionFavorites LiveSessionFavorite[]
+  clips              LiveClip[]
+  liveSessionArtists LiveSessionArtist[]
+  sessionFavorites   LiveSessionFavorite[]
 
   @@index([liveTime])
   @@index([status])
@@ -497,9 +548,11 @@ model LiveClip {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
-  session       LiveSession        @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  favorites     LiveClipFavorite[]
-  playlistSongs PlaylistSong[]
+  session         LiveSession        @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  favorites       LiveClipFavorite[]
+  liveClipArtists LiveClipArtist[]
+  playlistSongs   PlaylistSong[]
+  playHistories   PlayHistory[]
 
   @@index([sessionId])
   @@index([sessionId, trackIndex])

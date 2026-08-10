@@ -36,10 +36,14 @@ async function main() {
     prisma.favorite.groupBy({ by: ['songId'], _count: { _all: true } }),
   ]);
   const playMap = new Map<string, number>(
-    playCounts.map((r) => [r.songId, r._count._all]),
+    playCounts
+      .filter((r): r is { songId: string; _count: { _all: number } } => r.songId !== null)
+      .map((r) => [r.songId, r._count._all]),
   );
   const favMap = new Map<string, number>(
-    favoriteCounts.map((r) => [r.songId, r._count._all]),
+    favoriteCounts
+      .filter((r): r is { songId: string; _count: { _all: number } } => r.songId !== null)
+      .map((r) => [r.songId, r._count._all]),
   );
 
   let songFixed = 0;

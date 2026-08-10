@@ -20,6 +20,7 @@ import { TranscodingService } from './transcoding.service';
 import { OperationLogModule } from '../operation-log/operation-log.module';
 import { AdminLiveSessionController } from './admin-live-session.controller';
 import { AdminLiveClipController } from './admin-live-clip.controller';
+import { SearchSynonymController } from './search-synonym.controller';
 import { LiveSessionModule } from '../live-session/live-session.module';
 
 /**
@@ -46,6 +47,7 @@ import { LiveSessionModule } from '../live-session/live-session.module';
     AdminLiveSessionController,
     AdminLiveClipController,
     AdminTranscodingController,
+    SearchSynonymController,
   ],
   providers: [AdminService, AdminResourceService, ArtistMergeService, MigrationService, TranscodingService],
 })
