@@ -20,17 +20,17 @@ export class PlaylistService {
     const { page, limit, skip, take } = parsePagination(query);
     const where = { isPublic: true, deletedAt: null };
     const sort = query.sort ?? 'latest';
-    const createdAtOrder = sort === 'oldest' ? 'asc' as const : 'desc' as const;
+    const createdAtOrder =
+      sort === 'oldest' ? ('asc' as const) : ('desc' as const);
     const [list, total] = await this.prisma.$transaction([
       this.prisma.playlist.findMany({
         where,
         skip,
         take,
-        orderBy: [
-          { isSystem: 'desc' },
-          { createdAt: createdAtOrder },
-        ],
-        include: { user: { select: { id: true, username: true, avatar: true } } },
+        orderBy: [{ isSystem: 'desc' }, { createdAt: createdAtOrder }],
+        include: {
+          user: { select: { id: true, username: true, avatar: true } },
+        },
       }),
       this.prisma.playlist.count({ where }),
     ]);
@@ -85,14 +85,37 @@ export class PlaylistService {
     };
   }
 
-  /** 歌单下的歌曲/歌切列表（扁平数组，按 sort 升序） */
-  async getSongs(id: string) {
+  /**
+   * 歌单下的歌曲/歌切列表（扁平数组，按 sort 升序）
+   * - 不传分页参数：返回全量数组（向后兼容旧前端）
+   * - 传 page/limit/pageSize：返回 { list, total, page, ... } 分页结构
+   */
+  async getSongs(
+    id: string,
+    query?: { page?: string; limit?: string; pageSize?: string },
+  ) {
     const playlist = await this.getDetail(id);
-    return playlist.playlistSongs.map((ps) => {
+    const all = playlist.playlistSongs.map((ps) => {
       if (ps.song) {
-        return { ...ps.song, artistId: ps.song.artistId ?? ps.song.songArtists?.[0]?.artistId ?? null };
+        return {
+          ...ps.song,
+          artistId:
+            ps.song.artistId ?? ps.song.songArtists?.[0]?.artistId ?? null,
+        };
       }
       return ps.clip;
     });
+
+    const hasPagination = !!(query?.page || query?.limit || query?.pageSize);
+    if (!hasPagination) {
+      return all;
+    }
+    const { page, limit, skip } = parsePagination(query ?? {});
+    return buildPaginatedResult(
+      all.slice(skip, skip + limit),
+      all.length,
+      page,
+      limit,
+    );
   }
 }

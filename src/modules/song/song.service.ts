@@ -87,6 +87,94 @@ export class SongService {
   }
 
   /**
+   * 批量查询曲目详情（单曲 + 歌切混合，一次请求最多 100 首）
+   * - 按传入 ids 顺序返回，未命中/未发布的 ID 静默跳过
+   * - 统一基础字段：id / title / artist / album / cover / duration + trackType
+   */
+  async batchGetTracks(ids: string[]): Promise<unknown[]> {
+    const uniqueIds = Array.from(new Set(ids));
+
+    const [songs, clips] = await Promise.all([
+      this.prisma.song.findMany({
+        where: { id: { in: uniqueIds }, deletedAt: null, status: 'PUBLISHED' },
+        include: {
+          album: { select: { id: true, name: true, cover: true } },
+          songArtists: {
+            take: 1,
+            orderBy: { sort: 'asc' },
+            include: { artist: { select: { id: true } } },
+          },
+        },
+      }),
+      this.prisma.liveClip.findMany({
+        where: { id: { in: uniqueIds }, status: 'PUBLISHED' },
+        include: {
+          session: {
+            select: { id: true, title: true, liveTime: true, cover: true },
+          },
+        },
+      }),
+    ]);
+
+    const songMap = new Map(
+      songs.map((s) => [
+        s.id,
+        {
+          id: s.id,
+          trackType: 'song' as const,
+          title: s.title,
+          artist: s.artist,
+          artistId: s.songArtists?.[0]?.artistId ?? null,
+          albumId: s.albumId,
+          albumName: s.album?.name ?? null,
+          album: s.album
+            ? { id: s.album.id, name: s.album.name, cover: s.album.cover }
+            : null,
+          cover: s.coverUrl ?? s.album?.cover ?? null,
+          coverUrl: s.coverUrl ?? s.album?.cover ?? null,
+          duration: s.duration,
+          fileUrl: s.fileUrl,
+          url: s.fileUrl,
+          playCount: s.plays,
+          releaseDate: s.releaseDate.toISOString(),
+        },
+      ]),
+    );
+    const clipMap = new Map(
+      clips.map((c) => [
+        c.id,
+        {
+          id: c.id,
+          trackType: 'live_clip' as const,
+          title: c.title,
+          artist: c.artist,
+          artistId: null,
+          albumId: null,
+          albumName: null,
+          album: null,
+          cover: c.coverUrl ?? c.session?.cover ?? null,
+          coverUrl: c.coverUrl ?? c.session?.cover ?? null,
+          duration: c.duration,
+          fileUrl: c.fileUrl,
+          url: c.fileUrl,
+          sessionId: c.sessionId,
+          sessionName: c.session?.title ?? '',
+          sessionCover: c.session?.cover ?? null,
+          liveTime: c.session?.liveTime?.toISOString() ?? '',
+          trackIndex: c.trackIndex,
+        },
+      ]),
+    );
+
+    const result: unknown[] = [];
+    for (const id of uniqueIds) {
+      const track = songMap.get(id) ?? clipMap.get(id);
+      if (track) result.push(track);
+    }
+    return result;
+  }
+
+  /**
    * 获取歌曲音质列表
    * - 从 SongQuality 表查询该歌曲的所有音质版本
    * - 若无音质数据，返回默认音质选项（使用原始文件）
@@ -127,9 +215,14 @@ export class SongService {
       }
 
       // 按音质从高到低排序：HIGH → MEDIUM → LOW
-      const qualityOrder: Record<string, number> = { HIGH: 0, MEDIUM: 1, LOW: 2 };
+      const qualityOrder: Record<string, number> = {
+        HIGH: 0,
+        MEDIUM: 1,
+        LOW: 2,
+      };
       const sorted = [...qualities].sort(
-        (a, b) => (qualityOrder[a.quality] ?? 99) - (qualityOrder[b.quality] ?? 99),
+        (a, b) =>
+          (qualityOrder[a.quality] ?? 99) - (qualityOrder[b.quality] ?? 99),
       );
 
       return sorted.map((q) => ({
@@ -178,10 +271,14 @@ export class SongService {
       select: { lyricContent: true, lyricUrl: true },
     });
     if (song) {
-      this.logger.debug(`找到官方歌曲: id=${id}, lyricContent=${!!song.lyricContent}, lyricUrl=${song.lyricUrl}`);
+      this.logger.debug(
+        `找到官方歌曲: id=${id}, lyricContent=${!!song.lyricContent}, lyricUrl=${song.lyricUrl}`,
+      );
       if (song.lyricContent) return song.lyricContent;
       const content = await readLyricFile(song.lyricUrl);
-      this.logger.debug(`从文件读取歌词: id=${id}, 长度=${content?.length || 0}`);
+      this.logger.debug(
+        `从文件读取歌词: id=${id}, 长度=${content?.length || 0}`,
+      );
       return content;
     }
 
@@ -198,12 +295,16 @@ export class SongService {
         select: { id: true, status: true },
       });
       if (anyClip) {
-        this.logger.warn(`liveClip 存在但状态非 PUBLISHED: id=${id}, status=${anyClip.status}`);
+        this.logger.warn(
+          `liveClip 存在但状态非 PUBLISHED: id=${id}, status=${anyClip.status}`,
+        );
       }
       throw new NotFoundException('歌曲不存在');
     }
 
-    this.logger.debug(`找到 liveClip: id=${id}, lyricContent=${clip.lyricContent ? `长度${clip.lyricContent.length}` : '空'}`);
+    this.logger.debug(
+      `找到 liveClip: id=${id}, lyricContent=${clip.lyricContent ? `长度${clip.lyricContent.length}` : '空'}`,
+    );
     return clip.lyricContent ?? '';
   }
 }

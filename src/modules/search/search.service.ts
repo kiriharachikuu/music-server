@@ -3,7 +3,6 @@ import { PrismaService } from '../../prisma/prisma.service';
 import {
   buildPaginatedResult,
   parsePagination,
-  type PaginatedResult,
 } from '../../common/utils/pagination.util';
 import { toPinyinInitials } from './pinyin.util';
 import { expandQuery, type SearchQuery } from './query-expander';
@@ -16,8 +15,12 @@ export interface SongWithAlbum {
   coverUrl: string | null;
   fileUrl: string;
   albumName?: string;
-  album: { id: string; name: string } | null;
+  album: { id: string; name: string; cover?: string | null } | null;
   artistId?: string | null;
+  /** 统一 track 基础字段别名（id/title/artist/album/cover/duration） */
+  cover?: string | null;
+  url?: string;
+  trackType?: 'song';
 }
 
 type SortMode = 'relevance' | 'plays' | 'time' | 'time_asc';
@@ -126,7 +129,15 @@ export class SearchService {
             ? { releaseDate: 'asc' as const }
             : undefined;
 
-    const [songTotal, songs, albums, playlists, dbArtists, liveClips, liveSessions] = await Promise.all([
+    const [
+      songTotal,
+      songs,
+      albums,
+      playlists,
+      dbArtists,
+      liveClips,
+      liveSessions,
+    ] = await Promise.all([
       this.prisma.song.count({ where: songWhere }),
       this.prisma.song.findMany({
         where: songWhere,
@@ -134,7 +145,7 @@ export class SearchService {
         skip: pagination.skip,
         take: pagination.take,
         include: {
-          album: { select: { id: true, name: true } },
+          album: { select: { id: true, name: true, cover: true } },
           songArtists: {
             take: 1,
             orderBy: { sort: 'asc' },
@@ -162,10 +173,7 @@ export class SearchService {
             ...this.buildPlaylistTermClauses(terms, q),
           ],
         },
-        orderBy: [
-          { isSystem: 'desc' },
-          { playCount: 'desc' },
-        ],
+        orderBy: [{ isSystem: 'desc' }, { playCount: 'desc' }],
         take: 20,
         include: {
           user: { select: { id: true, username: true, avatar: true } },
@@ -186,7 +194,9 @@ export class SearchService {
         where: liveClipWhere,
         orderBy: [{ sessionId: 'asc' }, { trackIndex: 'asc' }],
         include: {
-          session: { select: { id: true, title: true, liveTime: true, cover: true } },
+          session: {
+            select: { id: true, title: true, liveTime: true, cover: true },
+          },
         },
         take: 10,
       }),
@@ -204,31 +214,49 @@ export class SearchService {
       ...song,
       albumName: song.album?.name,
       artistId: song.songArtists?.[0]?.artistId ?? null,
+      // 统一 track 基础字段别名
+      trackType: 'song' as const,
+      cover: song.coverUrl ?? song.album?.cover ?? null,
+      url: song.fileUrl,
     })) as unknown as SongWithAlbum[];
 
     let artists: Array<{
       id?: string;
       name: string;
       songCount: number;
+      clipCount: number;
       cover: string | null;
       avatar: string | null;
     }>;
 
     if (dbArtists.length > 0) {
       const artistIds = dbArtists.map((a) => a.id);
-      const songCountRows = await this.prisma.songArtist.groupBy({
-        by: ['artistId'],
-        where: {
-          artistId: { in: artistIds },
-          song: {
-            deletedAt: null,
-            status: 'PUBLISHED',
+      const [songCountRows, clipCountRows] = await Promise.all([
+        this.prisma.songArtist.groupBy({
+          by: ['artistId'],
+          where: {
+            artistId: { in: artistIds },
+            song: {
+              deletedAt: null,
+              status: 'PUBLISHED',
+            },
           },
-        },
-        _count: { artistId: true },
-      });
+          _count: { artistId: true },
+        }),
+        this.prisma.liveClipArtist.groupBy({
+          by: ['artistId'],
+          where: {
+            artistId: { in: artistIds },
+            clip: { status: 'PUBLISHED' },
+          },
+          _count: { artistId: true },
+        }),
+      ]);
       const countMap = new Map(
         songCountRows.map((r) => [r.artistId, r._count.artistId]),
+      );
+      const clipCountMap = new Map(
+        clipCountRows.map((r) => [r.artistId, r._count.artistId]),
       );
       artists = dbArtists.map((a) => ({
         id: a.id,
@@ -236,6 +264,7 @@ export class SearchService {
         cover: a.avatar,
         avatar: a.avatar,
         songCount: countMap.get(a.id) ?? 0,
+        clipCount: clipCountMap.get(a.id) ?? 0,
       }));
     } else {
       const map = new Map<string, number>();
@@ -243,24 +272,51 @@ export class SearchService {
         const count = map.get(song.artist) ?? 0;
         map.set(song.artist, count + 1);
       }
-      artists = Array.from(map.entries())
-        .map(([name, songCount]) => ({
-          id: undefined,
-          name,
-          songCount,
-          cover: null as string | null,
-          avatar: null as string | null,
-        }))
+      const names = Array.from(map.keys());
+      // Artist 表关键词未命中时，按歌曲 artist 字符串回查 Artist 表，尽量补齐 id / avatar
+      const namedArtists = names.length
+        ? await this.prisma.artist.findMany({
+            where: { deletedAt: null, name: { in: names } },
+            select: { id: true, name: true, avatar: true },
+          })
+        : [];
+      const artistByName = new Map(namedArtists.map((a) => [a.name, a]));
+      const clipRows = names.length
+        ? await this.prisma.liveClip.groupBy({
+            by: ['artist'],
+            where: { status: 'PUBLISHED', artist: { in: names } },
+            _count: { artist: true },
+          })
+        : [];
+      const clipCountByName = new Map(
+        clipRows.map((r) => [r.artist, r._count.artist]),
+      );
+      artists = names
+        .map((name) => {
+          const hit = artistByName.get(name);
+          return {
+            id: hit?.id,
+            name,
+            songCount: map.get(name) ?? 0,
+            clipCount: clipCountByName.get(name) ?? 0,
+            cover: hit?.avatar ?? null,
+            avatar: hit?.avatar ?? null,
+          };
+        })
         .slice(0, 20);
     }
 
-    // 映射 liveClips → LiveClipTrack 格式（与 searchByCategory 一致）
+    // 映射 liveClips -> LiveClipTrack 格式（与 searchByCategory 一致）
     const mappedLiveClips = liveClips.map((clip) => ({
       id: clip.id,
       title: clip.title,
       artist: clip.artist,
       cover: clip.coverUrl ?? clip.session?.cover,
+      coverUrl: clip.coverUrl ?? clip.session?.cover ?? null,
       url: clip.fileUrl,
+      fileUrl: clip.fileUrl,
+      albumName: null,
+      album: null,
       duration: clip.duration,
       trackType: 'live_clip' as const,
       sessionId: clip.sessionId,
@@ -279,8 +335,18 @@ export class SearchService {
       albums,
       playlists,
       artists,
-      liveClips: buildPaginatedResult(mappedLiveClips, mappedLiveClips.length, 1, mappedLiveClips.length || 20),
-      liveSessions: buildPaginatedResult(liveSessions, liveSessions.length, 1, liveSessions.length || 20),
+      liveClips: buildPaginatedResult(
+        mappedLiveClips,
+        mappedLiveClips.length,
+        1,
+        mappedLiveClips.length || 20,
+      ),
+      liveSessions: buildPaginatedResult(
+        liveSessions,
+        liveSessions.length,
+        1,
+        liveSessions.length || 20,
+      ),
     };
   }
 
@@ -325,7 +391,9 @@ export class SearchService {
           where,
           orderBy: [{ sessionId: 'asc' }, { trackIndex: 'asc' }],
           include: {
-            session: { select: { id: true, title: true, liveTime: true, cover: true } },
+            session: {
+              select: { id: true, title: true, liveTime: true, cover: true },
+            },
           },
           skip: pagination.skip,
           take: pagination.take,
@@ -338,7 +406,11 @@ export class SearchService {
         title: clip.title,
         artist: clip.artist,
         cover: clip.coverUrl ?? clip.session?.cover,
+        coverUrl: clip.coverUrl ?? clip.session?.cover ?? null,
         url: clip.fileUrl,
+        fileUrl: clip.fileUrl,
+        albumName: null,
+        album: null,
         duration: clip.duration,
         trackType: 'live_clip' as const,
         sessionId: clip.sessionId,
@@ -347,7 +419,12 @@ export class SearchService {
         trackIndex: clip.trackIndex,
       }));
       return {
-        liveClips: buildPaginatedResult(mapped, total, pagination.page, pagination.limit),
+        liveClips: buildPaginatedResult(
+          mapped,
+          total,
+          pagination.page,
+          pagination.limit,
+        ),
         liveSessions: buildPaginatedResult([], 0, 1, 20),
       };
     }
@@ -373,7 +450,12 @@ export class SearchService {
       ]);
       return {
         liveClips: buildPaginatedResult([], 0, 1, 20),
-        liveSessions: buildPaginatedResult(list, total, pagination.page, pagination.limit),
+        liveSessions: buildPaginatedResult(
+          list,
+          total,
+          pagination.page,
+          pagination.limit,
+        ),
       };
     }
 
@@ -489,7 +571,11 @@ export class SearchService {
       plays: number;
       releaseDate: Date;
     },
-  >(songs: T[], query: SearchQuery, sort: SortMode): Array<T & { score: number }> {
+  >(
+    songs: T[],
+    query: SearchQuery,
+    sort: SortMode,
+  ): Array<T & { score: number }> {
     const synonyms = query.synonyms;
     const pinyin = query.pinyin;
     const raw = query.raw;
@@ -562,7 +648,7 @@ export class SearchService {
     const filter: Record<string, unknown> = {};
 
     if (startDate || endDate) {
-      filter.releaseDate = {} as Record<string, unknown>;
+      filter.releaseDate = {};
 
       if (startDate) {
         const start = new Date(startDate);

@@ -28,33 +28,57 @@ export class DownloadController {
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
 
-  /** GET /api/songs/:id/download-url 获取预签名下载直链 */
+  /**
+   * GET /api/songs/:id/download-url 获取预签名下载直链
+   * 同时支持单曲（Song）与直播歌切（LiveClip）；
+   * 下载记录仅对单曲生效（DownloadRecord.songId 外键约束）
+   */
   @Get(':id/download-url')
   async getDownloadUrl(
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
   ) {
-    // 1. 查询歌曲（未删除）
+    // 1. 查询单曲（未删除）
     const song = await this.prisma.song.findFirst({
       where: { id, deletedAt: null },
       select: { id: true, fileUrl: true },
     });
-    if (!song) {
+
+    if (song) {
+      const url = await this.presign(song.fileUrl);
+      // 记录下载到 DownloadRecord（fire-and-forget，失败忽略）
+      void this.recordDownload(userId, id);
+      return {
+        url,
+        expiresIn: DownloadController.DEFAULT_EXPIRES_IN,
+        trackType: 'song' as const,
+      };
+    }
+
+    // 2. 单曲未命中，回退查询歌切（已发布）
+    const clip = await this.prisma.liveClip.findFirst({
+      where: { id, status: 'PUBLISHED' },
+      select: { id: true, fileUrl: true },
+    });
+    if (!clip) {
       throw new NotFoundException('歌曲不存在');
     }
 
-    // 2. 从完整 fileUrl 反推存储内部 path
-    const filePath = this.storage.extractPath(song.fileUrl);
+    const url = await this.presign(clip.fileUrl);
+    return {
+      url,
+      expiresIn: DownloadController.DEFAULT_EXPIRES_IN,
+      trackType: 'live_clip' as const,
+    };
+  }
 
-    // 3. 生成预签名下载 URL
-    const expiresIn = DownloadController.DEFAULT_EXPIRES_IN;
-    const url = await this.storage.presign(filePath, expiresIn);
-
-    // 4. 记录下载到 DownloadRecord（fire-and-forget，失败忽略）
-    void this.recordDownload(userId, id);
-
-    // 5. 返回下载直链
-    return { url, expiresIn };
+  /** 生成预签名下载 URL（从完整 fileUrl 反推存储内部 path） */
+  private async presign(fileUrl: string): Promise<string> {
+    const filePath = this.storage.extractPath(fileUrl);
+    return this.storage.presign(
+      filePath,
+      DownloadController.DEFAULT_EXPIRES_IN,
+    );
   }
 
   /**

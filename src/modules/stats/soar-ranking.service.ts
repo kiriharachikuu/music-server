@@ -18,6 +18,8 @@ export class SoarRankingService {
   private readonly logger = new Logger(SoarRankingService.name);
   private static readonly TOP_N = 50;
   private static readonly SETTING_KEY = 'soarRankingData';
+  /** 缓存结构版本：字段结构变更时递增，旧缓存视为失效并重算 */
+  private static readonly CACHE_VERSION = 2;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -136,35 +138,50 @@ export class SoarRankingService {
         if (m.kind === 'song') {
           const song = songMap.get(m.id);
           if (!song) return null;
+          const cover = song.coverUrl ?? song.album?.cover ?? null;
           return {
             id: song.id,
             itemId: song.id,
             trackType: 'song',
             title: song.title,
             artist: song.artist,
-            cover: song.coverUrl ?? song.album?.cover ?? null,
+            cover,
+            coverUrl: cover,
             duration: song.duration,
             rank: 0,
             artistId: song.songArtists?.[0]?.artistId ?? null,
+            albumId: song.albumId,
+            albumName: song.album?.name,
+            album: song.album
+              ? { id: song.albumId, name: song.album.name, cover: song.album.cover }
+              : null,
             playCount: m.thisCount,
             growth: m.growth,
             fileUrl: song.fileUrl,
+            url: song.fileUrl,
           };
         }
         const clip = clipMap.get(m.id);
         if (!clip) return null;
+        const cover = clip.coverUrl ?? clip.session?.cover ?? null;
         return {
           id: clip.id,
           itemId: clip.id,
-          trackType: 'clip',
+          trackType: 'live_clip',
           title: clip.title,
           artist: clip.artist,
-          cover: clip.coverUrl ?? clip.session?.cover ?? null,
+          cover,
+          sessionCover: clip.session?.cover ?? cover,
+          albumName: null,
+          album: null,
           duration: clip.duration,
           rank: 0,
           sessionId: clip.sessionId,
           sessionName: clip.session?.title ?? '',
+          liveTime: clip.session?.liveTime?.toISOString() ?? '',
+          trackIndex: clip.trackIndex,
           fileUrl: clip.fileUrl,
+          url: clip.fileUrl,
           playCount: m.thisCount,
           growth: m.growth,
         };
@@ -173,6 +190,7 @@ export class SoarRankingService {
       .map((it, idx) => ({ ...it, rank: idx + 1 }));
 
     const payload = JSON.stringify({
+      version: SoarRankingService.CACHE_VERSION,
       items,
       computedAt: new Date().toISOString(),
     });
@@ -205,7 +223,11 @@ export class SoarRankingService {
     });
     if (!row) return null;
     try {
-      return JSON.parse(row.value);
+      const parsed = JSON.parse(row.value);
+      if (parsed?.version !== SoarRankingService.CACHE_VERSION) {
+        return null;
+      }
+      return parsed;
     } catch {
       return null;
     }

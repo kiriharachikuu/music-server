@@ -4,6 +4,7 @@ import { HotRankingService } from './hot-ranking.service';
 import { SoarRankingService } from './soar-ranking.service';
 import { NewRankingService } from './new-ranking.service';
 import {
+  LegacyRankingsResponse,
   RankingItem,
   RankingKind,
   RankingResponse,
@@ -87,7 +88,9 @@ export class StatsService {
       this.prisma.liveClip.findMany({
         where: { status: 'PUBLISHED' },
         include: {
-          session: { select: { id: true, title: true, liveTime: true, cover: true } },
+          session: {
+            select: { id: true, title: true, liveTime: true, cover: true },
+          },
         },
         orderBy: [{ sessionId: 'asc' }, { trackIndex: 'asc' }],
         take: 50,
@@ -107,10 +110,7 @@ export class StatsService {
       }),
       this.prisma.playlist.findMany({
         where: { isPublic: true, deletedAt: null },
-        orderBy: [
-          { isSystem: 'desc' },
-          { playCount: 'desc' },
-        ],
+        orderBy: [{ isSystem: 'desc' }, { playCount: 'desc' }],
         take: 6,
         include: {
           user: { select: { id: true, username: true, avatar: true } },
@@ -122,7 +122,11 @@ export class StatsService {
         take: 12,
         include: {
           _count: {
-            select: { songArtists: { where: { song: { deletedAt: null, status: 'PUBLISHED' } } } },
+            select: {
+              songArtists: {
+                where: { song: { deletedAt: null, status: 'PUBLISHED' } },
+              },
+            },
           },
         },
       }),
@@ -136,7 +140,9 @@ export class StatsService {
           ...song,
           artistId: song.songArtists?.[0]?.artistId ?? null,
         })),
-      dailyClips: this.shuffle(this.mapClipsToLiveClipTrack(dailyClipsPool)).slice(0, 20),
+      dailyClips: this.shuffle(
+        this.mapClipsToLiveClipTrack(dailyClipsPool),
+      ).slice(0, 20),
       newSongs: newSongs.map((song) => ({
         ...song,
         artistId: song.songArtists?.[0]?.artistId ?? null,
@@ -169,10 +175,12 @@ export class StatsService {
         },
       },
     });
-    return this.shuffle(pool).slice(0, limit).map((song) => ({
-      ...song,
-      artistId: song.songArtists?.[0]?.artistId ?? null,
-    }));
+    return this.shuffle(pool)
+      .slice(0, limit)
+      .map((song) => ({
+        ...song,
+        artistId: song.songArtists?.[0]?.artistId ?? null,
+      }));
   }
 
   /**
@@ -182,7 +190,9 @@ export class StatsService {
     const pool = await this.prisma.liveClip.findMany({
       where: { status: 'PUBLISHED' },
       include: {
-        session: { select: { id: true, title: true, liveTime: true, cover: true } },
+        session: {
+          select: { id: true, title: true, liveTime: true, cover: true },
+        },
       },
       orderBy: [{ sessionId: 'asc' }, { trackIndex: 'asc' }],
       take: 50,
@@ -194,13 +204,34 @@ export class StatsService {
    * 将 liveClip 记录映射为前端 LiveClipTrack 格式
    * 扁平化 session 字段 + 添加 trackType（与 search.service.ts 保持一致）
    */
-  private mapClipsToLiveClipTrack(clips: any[]): any[] {
+  private mapClipsToLiveClipTrack(
+    clips: Array<{
+      id: string;
+      title: string;
+      artist: string;
+      coverUrl: string | null;
+      fileUrl: string;
+      duration: number;
+      sessionId: string;
+      trackIndex: number;
+      session: {
+        id: string;
+        title: string;
+        liveTime: Date | null;
+        cover: string | null;
+      } | null;
+    }>,
+  ): any[] {
     return clips.map((clip) => ({
       id: clip.id,
       title: clip.title,
       artist: clip.artist,
       cover: clip.coverUrl ?? clip.session?.cover,
+      coverUrl: clip.coverUrl ?? clip.session?.cover ?? null,
       url: clip.fileUrl,
+      fileUrl: clip.fileUrl,
+      albumName: null,
+      album: null,
       duration: clip.duration,
       trackType: 'live_clip' as const,
       sessionId: clip.sessionId,
@@ -216,8 +247,22 @@ export class StatsService {
    * 单档综合排行榜入口
    * @param ranking 飙升(soar) / 热歌(hot) / 新歌(new)
    */
+  async getLegacyRankings(): Promise<LegacyRankingsResponse> {
+    const [soar, newItems, hot] = await Promise.all([
+      this.soarRankingService.getTop(),
+      this.newRankingService.getTop(),
+      this.hotRankingService.getTop(),
+    ]);
+    return {
+      soar: this.normalizeRankingItems(soar),
+      new: this.normalizeRankingItems(newItems),
+      hot: this.normalizeRankingItems(hot),
+    };
+  }
+
   async getRanking(
     ranking: RankingKind = 'soar',
+    page?: { limit?: number; offset?: number },
   ): Promise<RankingResponse> {
     let items: RankingItem[] = [];
     if (ranking === 'soar') {
@@ -228,23 +273,63 @@ export class StatsService {
       items = await this.newRankingService.getTop();
     }
 
-    // 重排 rank（防止缓存中 rank 字段缺失/重复）
-    const tracks = items.map((it, idx) => ({ ...it, rank: idx + 1 }));
+    const normalized = this.normalizeRankingItems(items);
+
+    // 分页：不传 limit/offset 时返回全量（向后兼容）
+    const total = normalized.length;
+    const limit =
+      page?.limit && page.limit > 0 ? Math.min(100, page.limit) : total;
+    const offset = page?.offset && page.offset > 0 ? page.offset : 0;
+    const tracks = normalized.slice(offset, offset + limit);
 
     const playlist = await this.rankingPlaylistService.findPlaylist(ranking);
+    const updatedAt = new Date().toISOString();
 
     return {
       ranking,
       title: RankingPlaylistService.nameOf(ranking),
-      cover: playlist?.cover ?? tracks[0]?.cover ?? null,
-      description:
-        RANKING_DESCRIPTIONS[ranking] ??
-        playlist?.description ??
-        '',
+      cover: playlist?.cover ?? normalized[0]?.cover ?? null,
+      description: RANKING_DESCRIPTIONS[ranking] ?? playlist?.description ?? '',
       tracks,
-      updatedAt: new Date().toISOString(),
+      total,
+      limit,
+      offset,
+      hasMore: offset + tracks.length < total,
+      updatedAt,
+      generatedAt: updatedAt,
       playlistId: playlist?.id ?? null,
     };
+  }
+
+  private normalizeRankingItems(items: RankingItem[]): RankingItem[] {
+    return items.map((item, idx) => {
+      const isClip =
+        item.trackType === 'live_clip' || item.trackType === 'clip';
+      const cover = item.cover ?? item.coverUrl ?? item.sessionCover ?? null;
+      const albumName = item.albumName ?? item.album?.name;
+      const playCount = item.playCount ?? item.plays ?? 0;
+      return {
+        ...item,
+        id: item.itemId ?? item.id,
+        itemId: item.itemId ?? item.id,
+        trackType: isClip ? 'live_clip' : 'song',
+        rank: idx + 1,
+        cover,
+        coverUrl: item.coverUrl ?? cover,
+        albumName,
+        album: item.album
+          ? { id: item.albumId ?? null, ...item.album }
+          : albumName
+            ? { id: item.albumId ?? null, name: albumName }
+            : null,
+        sessionCover: item.sessionCover ?? cover,
+        playCount,
+        plays: playCount,
+        favoriteCount: item.favoriteCount ?? 0,
+        fileUrl: item.fileUrl ?? item.url ?? null,
+        url: item.url ?? item.fileUrl ?? null,
+      };
+    });
   }
 
   /** 站点公开设置项 */

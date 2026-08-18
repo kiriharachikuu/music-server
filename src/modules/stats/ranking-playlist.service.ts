@@ -118,16 +118,17 @@ export class RankingPlaylistService {
         this.prisma.playlistSong.deleteMany({
           where: { playlistId: playlist.id },
         }),
-        ...items.map((item, index) =>
-          this.prisma.playlistSong.create({
+        ...items.map((item, index) => {
+          const isClip = item.trackType === 'live_clip' || item.trackType === 'clip';
+          return this.prisma.playlistSong.create({
             data: {
               playlistId: playlist.id,
-              songId: item.trackType === 'song' ? item.itemId : null,
-              clipId: item.trackType === 'clip' ? item.itemId : null,
+              songId: isClip ? null : item.itemId,
+              clipId: isClip ? item.itemId : null,
               sort: index,
             },
-          }),
-        ),
+          });
+        }),
         this.prisma.playlist.update({
           where: { id: playlist.id },
           data: {

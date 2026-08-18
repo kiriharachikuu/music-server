@@ -18,6 +18,11 @@ export class HotRankingService implements OnModuleInit {
   private static readonly TOP_N = 50;
   private static readonly SETTING_KEY = 'hotRankingData';
   private static readonly CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+  /**
+   * 缓存结构版本：字段结构变更（如新增 albumName / album 对象）时递增，
+   * 旧版本缓存会被 readCache 视为失效并触发重算，避免线上旧缓存长期缺字段
+   */
+  private static readonly CACHE_VERSION = 2;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -105,34 +110,49 @@ export class HotRankingService implements OnModuleInit {
         if (m.kind === 'song') {
           const song = songMap.get(m.id);
           if (!song) return null;
+          const cover = song.coverUrl ?? song.album?.cover ?? null;
           return {
             id: song.id,
             itemId: song.id,
             trackType: 'song',
             title: song.title,
             artist: song.artist,
-            cover: song.coverUrl ?? song.album?.cover ?? null,
+            cover,
+            coverUrl: cover,
             duration: song.duration,
             rank: 0,
             artistId: song.songArtists?.[0]?.artistId ?? null,
+            albumId: song.albumId,
+            albumName: song.album?.name,
+            album: song.album
+              ? { id: song.albumId, name: song.album.name, cover: song.album.cover }
+              : null,
             playCount: m.count,
             fileUrl: song.fileUrl,
+            url: song.fileUrl,
           };
         }
         const clip = clipMap.get(m.id);
         if (!clip) return null;
+        const cover = clip.coverUrl ?? clip.session?.cover ?? null;
         return {
           id: clip.id,
           itemId: clip.id,
-          trackType: 'clip',
+          trackType: 'live_clip',
           title: clip.title,
           artist: clip.artist,
-          cover: clip.coverUrl ?? clip.session?.cover ?? null,
+          cover,
+          sessionCover: clip.session?.cover ?? cover,
+          albumName: null,
+          album: null,
           duration: clip.duration,
           rank: 0,
           sessionId: clip.sessionId,
           sessionName: clip.session?.title ?? '',
+          liveTime: clip.session?.liveTime?.toISOString() ?? '',
+          trackIndex: clip.trackIndex,
           fileUrl: clip.fileUrl,
+          url: clip.fileUrl,
           playCount: m.count,
         };
       })
@@ -141,13 +161,8 @@ export class HotRankingService implements OnModuleInit {
 
     // 缓存到 SystemSetting
     const payload = JSON.stringify({
-      items: items.map((it) => ({
-        ...it,
-        // 移除 Prisma include 出来的扩展字段，仅保留 RankingItem 标准字段
-        album: undefined,
-        songArtists: undefined,
-        session: undefined,
-      })),
+      version: HotRankingService.CACHE_VERSION,
+      items,
       computedAt: new Date().toISOString(),
     });
 
@@ -175,7 +190,7 @@ export class HotRankingService implements OnModuleInit {
     return this.compute();
   }
 
-  /** 读取缓存原始数据 */
+  /** 读取缓存原始数据（版本不匹配视为失效） */
   private async readCache(): Promise<{
     items: RankingItem[];
     computedAt: string;
@@ -185,7 +200,11 @@ export class HotRankingService implements OnModuleInit {
     });
     if (!row) return null;
     try {
-      return JSON.parse(row.value);
+      const parsed = JSON.parse(row.value);
+      if (parsed?.version !== HotRankingService.CACHE_VERSION) {
+        return null;
+      }
+      return parsed;
     } catch {
       return null;
     }

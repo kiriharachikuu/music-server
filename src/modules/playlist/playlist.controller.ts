@@ -26,9 +26,17 @@ export class PlaylistController {
     return this.playlistService.getDetail(id);
   }
 
-  /** GET /api/playlists/:id/songs 歌单下的歌曲列表 */
+  /**
+   * GET /api/playlists/:id/songs 歌单下的歌曲列表
+   * 可选分页：page/limit/pageSize（不传则返回全量扁平数组）
+   */
   @Get(':id/songs')
-  getSongs(@Param('id') id: string) {
-    return this.playlistService.getSongs(id);
+  getSongs(
+    @Param('id') id: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    return this.playlistService.getSongs(id, { page, limit, pageSize });
   }
 }

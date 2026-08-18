@@ -21,6 +21,7 @@ export class RankingsController {
    * - ranking=soar 综合-飙升榜
    * - ranking=hot 综合-热歌榜
    * - ranking=new 综合-新歌榜
+   * - limit/offset 可选分页（不传则返回全量，向后兼容）
    *
    * 注：旧版 type=combined|single|clip 参数被忽略，仅保留 3 档综合榜单。
    */
@@ -28,9 +29,19 @@ export class RankingsController {
   rankings(
     @Query('type') _type?: string,
     @Query('ranking') ranking?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
   ) {
+    if (!ranking) {
+      return this.statsService.getLegacyRankings();
+    }
     const r = this.normalizeRanking(ranking);
-    return this.statsService.getRanking(r);
+    const parsedLimit = limit ? parseInt(limit, 10) : undefined;
+    const parsedOffset = offset ? parseInt(offset, 10) : undefined;
+    return this.statsService.getRanking(r, {
+      limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined,
+      offset: Number.isFinite(parsedOffset) ? parsedOffset : undefined,
+    });
   }
 
   private normalizeRanking(ranking?: string): RankingKind {

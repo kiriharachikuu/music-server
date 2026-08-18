@@ -17,6 +17,8 @@ export class NewRankingService {
   private static readonly TOP_N = 50;
   private static readonly CACHE_TTL_MS = 10 * 60 * 1000;
   private static readonly SETTING_KEY = 'newRankingData';
+  /** 缓存结构版本：字段结构变更时递增，旧缓存视为失效并重算 */
+  private static readonly CACHE_VERSION = 2;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -31,6 +33,7 @@ export class NewRankingService {
     this.logger.log('刷新综合新歌榜...');
     const items = await this.fetchItems();
     const payload = JSON.stringify({
+      version: NewRankingService.CACHE_VERSION,
       items,
       computedAt: new Date().toISOString(),
     });
@@ -92,36 +95,56 @@ export class NewRankingService {
       ...songs.map<RawItem>((song) => ({
         kind: 'song',
         createdAt: song.createdAt,
-        build: () => ({
-          id: song.id,
-          itemId: song.id,
-          trackType: 'song' as const,
-          title: song.title,
-          artist: song.artist,
-          cover: song.coverUrl ?? song.album?.cover ?? null,
-          duration: song.duration,
-          rank: 0,
-          artistId: song.songArtists?.[0]?.artistId ?? null,
-          createdAt: song.createdAt.toISOString(),
-        }),
+        build: () => {
+          const cover = song.coverUrl ?? song.album?.cover ?? null;
+          return {
+            id: song.id,
+            itemId: song.id,
+            trackType: 'song' as const,
+            title: song.title,
+            artist: song.artist,
+            cover,
+            coverUrl: cover,
+            duration: song.duration,
+            rank: 0,
+            artistId: song.songArtists?.[0]?.artistId ?? null,
+            albumId: song.albumId,
+            albumName: song.album?.name,
+            album: song.album
+              ? { id: song.albumId, name: song.album.name, cover: song.album.cover }
+              : null,
+            fileUrl: song.fileUrl,
+            url: song.fileUrl,
+            createdAt: song.createdAt.toISOString(),
+          };
+        },
       })),
       ...clips.map<RawItem>((clip) => ({
         kind: 'clip',
         createdAt: clip.createdAt,
-        build: () => ({
-          id: clip.id,
-          itemId: clip.id,
-          trackType: 'clip' as const,
-          title: clip.title,
-          artist: clip.artist,
-          cover: clip.coverUrl ?? clip.session?.cover ?? null,
-          duration: clip.duration,
-          rank: 0,
-          sessionId: clip.sessionId,
-          sessionName: clip.session?.title ?? '',
-          fileUrl: clip.fileUrl,
-          createdAt: clip.createdAt.toISOString(),
-        }),
+        build: () => {
+          const cover = clip.coverUrl ?? clip.session?.cover ?? null;
+          return {
+            id: clip.id,
+            itemId: clip.id,
+            trackType: 'live_clip' as const,
+            title: clip.title,
+            artist: clip.artist,
+            cover,
+            sessionCover: clip.session?.cover ?? cover,
+            albumName: null,
+            album: null,
+            duration: clip.duration,
+            rank: 0,
+            sessionId: clip.sessionId,
+            sessionName: clip.session?.title ?? '',
+            liveTime: clip.session?.liveTime?.toISOString() ?? '',
+            trackIndex: clip.trackIndex,
+            fileUrl: clip.fileUrl,
+            url: clip.fileUrl,
+            createdAt: clip.createdAt.toISOString(),
+          };
+        },
       })),
     ];
 
@@ -140,7 +163,11 @@ export class NewRankingService {
     });
     if (!row) return null;
     try {
-      return JSON.parse(row.value);
+      const parsed = JSON.parse(row.value);
+      if (parsed?.version !== NewRankingService.CACHE_VERSION) {
+        return null;
+      }
+      return parsed;
     } catch {
       return null;
     }

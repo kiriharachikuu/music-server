@@ -414,6 +414,70 @@ export class UserService {
     return !!fav;
   }
 
+  /**
+   * 获取我收藏的全部歌单（按收藏时间倒序）
+   * - 用于 PC 端"音乐库 → 收藏歌单"Tab
+   * - 过滤已软删的歌单（deletedAt 不为空的不返回）
+   * - 返回字段：歌单全部基础字段 + 收藏时间 favoriteCreatedAt
+   */
+  async getFavoritePlaylists(userId: string) {
+    const favorites = await this.prisma.playlistFavorite.findMany({
+      where: { userId, playlist: { deletedAt: null } },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        playlist: {
+          select: {
+            id: true,
+            name: true,
+            cover: true,
+            description: true,
+            isPublic: true,
+            isSystem: true,
+            playCount: true,
+            userId: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        },
+      },
+    });
+    return favorites.map((f) => ({
+      ...f.playlist,
+      favoriteCreatedAt: f.createdAt,
+    }));
+  }
+
+  /**
+   * 获取我收藏的全部专辑（按收藏时间倒序）
+   * - 用于 PC 端"音乐库 → 收藏专辑"Tab
+   * - 过滤已软删的专辑
+   */
+  async getFavoriteAlbums(userId: string) {
+    const favorites = await this.prisma.albumFavorite.findMany({
+      where: { userId, album: { deletedAt: null } },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        album: {
+          select: {
+            id: true,
+            name: true,
+            artist: true,
+            cover: true,
+            description: true,
+            releaseDate: true,
+            songCount: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        },
+      },
+    });
+    return favorites.map((f) => ({
+      ...f.album,
+      favoriteCreatedAt: f.createdAt,
+    }));
+  }
+
   /** 播放历史（分页，按 playTime 降序，含歌曲详情） */
   async getHistory(
     userId: string,
@@ -438,6 +502,13 @@ export class UserService {
               },
             },
           },
+          clip: {
+            include: {
+              session: {
+                select: { id: true, title: true, liveTime: true, cover: true },
+              },
+            },
+          },
         },
       }),
       this.prisma.playHistory.count({ where }),
@@ -450,6 +521,26 @@ export class UserService {
             artistId: h.song.songArtists?.[0]?.artistId ?? null,
           }
         : h.song,
+      // 歌切扁平化为前端 LiveClipTrack 格式 (与 stats/search 接口一致)
+      clip: h.clip
+        ? {
+            id: h.clip.id,
+            title: h.clip.title,
+            artist: h.clip.artist,
+            artistId: null,
+            duration: h.clip.duration,
+            url: h.clip.fileUrl,
+            cover: h.clip.coverUrl ?? h.clip.session?.cover ?? null,
+            coverUrl: h.clip.coverUrl ?? null,
+            lyricUrl: null,
+            lyricContent: h.clip.lyricContent ?? null,
+            trackType: 'live_clip' as const,
+            sessionId: h.clip.sessionId,
+            sessionName: h.clip.session?.title ?? '',
+            liveTime: h.clip.session?.liveTime?.toISOString() ?? '',
+            trackIndex: h.clip.trackIndex,
+          }
+        : h.clip,
     }));
     return buildPaginatedResult(mapped, total, page, limit);
   }

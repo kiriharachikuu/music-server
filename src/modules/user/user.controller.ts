@@ -150,6 +150,18 @@ export class UserController {
     return this.userService.getMyPlaylists(userId);
   }
 
+  /** GET /api/user/playlists/favorites 我收藏的歌单列表（按收藏时间倒序） */
+  @Get('playlists/favorites')
+  getFavoritePlaylists(@CurrentUser('id') userId: string) {
+    return this.userService.getFavoritePlaylists(userId);
+  }
+
+  /** GET /api/user/albums/favorites 我收藏的专辑列表（按收藏时间倒序） */
+  @Get('albums/favorites')
+  getFavoriteAlbums(@CurrentUser('id') userId: string) {
+    return this.userService.getFavoriteAlbums(userId);
+  }
+
   /** POST /api/user/playlists 创建歌单 */
   @Post('playlists')
   createPlaylist(
