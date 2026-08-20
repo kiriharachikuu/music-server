@@ -36,8 +36,15 @@ export class AdminAppVersionController {
     @Query('limit') limit?: string,
     @Query('channel') channel?: string,
     @Query('platform') platform?: string,
+    @Query('variant') variant?: string,
   ) {
-    return this.appVersionService.listVersions({ page, limit, channel, platform });
+    return this.appVersionService.listVersions({
+      page,
+      limit,
+      channel,
+      platform,
+      variant,
+    });
   }
 
   @Get(':id')

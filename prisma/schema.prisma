@@ -358,7 +358,7 @@ model SystemSetting {
 // App版本更新表
 model AppVersion {
   id             String   @id @default(cuid())
-  versionCode    Int      @unique
+  versionCode    Int
   versionName    String
   title          String?
   content        String? // 更新内容，JSON数组字符串
@@ -368,12 +368,14 @@ model AppVersion {
   forceUpdate    Boolean  @default(false)
   minVersionCode Int      @default(0)
   channel        String   @default("stable") // stable / beta
-  platform       String   @default("android") // android / ios / desktop
+  platform       String   @default("android") // android / windows / ios（读侧兼容旧值 desktop）
+  variant        String   @default("full") // full(APK完整包) / setup(Win安装版) / portable(Win便携版)
   status         String   @default("published") // draft / published / deprecated
   downloadCount  Int      @default(0)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
+  @@unique([platform, versionCode])
   @@index([channel, platform, status])
   @@index([versionCode])
 }
