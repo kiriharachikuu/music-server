@@ -91,6 +91,34 @@ async function bootstrap() {
     app.use(helmet(helmetConfig));
   }
 
+  // 官网公共接口 /api/public/app-versions 专用跨域白名单：
+  // - 独立配置 PUBLIC_API_CORS_ORIGINS（未配置时回落到通用白名单 CORS_ORIGINS）
+  // - 需在 enableCors 之前注册，确保专用白名单的预检请求（OPTIONS）由本中间件响应
+  if (corsEnabled) {
+    const publicApiOrigins =
+      configService.get<string[]>('publicApi.corsOrigins') ?? [];
+    const publicAllowedOrigins = publicApiOrigins.length
+      ? publicApiOrigins
+      : corsOrigins;
+    app.use(
+      '/api/public/app-versions',
+      (req: Request, res: Response, next: NextFunction) => {
+        const origin = req.headers.origin;
+        if (origin && publicAllowedOrigins.includes(origin)) {
+          res.setHeader('Access-Control-Allow-Origin', origin);
+          res.setHeader('Vary', 'Origin');
+          res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+          res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+          res.setHeader('Access-Control-Max-Age', '86400');
+        }
+        if (req.method === 'OPTIONS') {
+          return res.sendStatus(204);
+        }
+        next();
+      },
+    );
+  }
+
   // 跨域配置：
   // - Nginx 反代场景下，建议由 Nginx 统一处理 CORS（性能更好）
   // - 若由 Nginx 处理，设置 CORS_ENABLED=false 关闭后端 CORS，避免重复设置

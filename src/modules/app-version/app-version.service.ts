@@ -15,35 +15,69 @@ import {
 } from '../../common/utils/pagination.util';
 import { STORAGE_SERVICE } from '../upload/storage.interface';
 import type { StorageService } from '../upload/storage.interface';
+import { parseVersion, isNewerVersion } from '../../common/utils/semver.util';
 import * as crypto from 'crypto';
+
+/** 官网公共接口返回的平台版本摘要 */
+export interface PublicAppVersionSummary {
+  android: {
+    version: string;
+    versionCode: number;
+    changelog: string[];
+    downloadUrl: string;
+    fileSize: number;
+    publishedAt: Date;
+  } | null;
+  pc: {
+    version: string;
+    versionCode: number;
+    changelog: string[];
+    downloadUrl: string;
+    fileSize: number;
+    publishedAt: Date;
+  } | null;
+}
+
+/** 平台端点支持的平台标识（pc 映射为 windows 存储） */
+export type UpdatePlatform = 'android' | 'pc';
 
 @Injectable()
 export class AppVersionService {
+  /** 公共接口内存缓存 TTL（毫秒） */
+  private static readonly PUBLIC_CACHE_TTL_MS = 60_000;
+  /** 官网公共接口内存缓存 */
+  private publicVersionsCache?: {
+    expiresAt: number;
+    data: PublicAppVersionSummary;
+  };
+
   constructor(
     private readonly prisma: PrismaService,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
 
   /**
-   * 平台标识规范化：旧值 desktop 统一映射为 windows，未传默认 android
+   * 平台标识规范化：旧值 desktop / 新值 pc 统一映射为 windows，未传默认 android
    */
   private normalizePlatform(platform?: string): string {
     if (!platform) return 'android';
-    return platform === 'desktop' ? 'windows' : platform;
+    return platform === 'desktop' || platform === 'pc' ? 'windows' : platform;
   }
 
   /**
    * 获取最新版本（用户端检查更新 / 下载页用）
    * @param channel 发布渠道 stable/beta
-   * @param platform 平台 android/windows/ios（兼容旧值 desktop）
-   * @param versionCode 当前版本号
+   * @param platform 平台 android/windows/ios（兼容旧值 desktop / 别名 pc）
+   * @param versionCode 当前版本码（数值比较，可选）
    * @param variant 发布形态 full/setup/portable（可选；不传则取该平台最高版本）
+   * @param currentVersionName 当前语义化版本号（semver 比较，可选；与 versionCode 任一命中即视为有更新）
    */
   async getLatestVersion(
     channel: string = 'stable',
     platform: string = 'android',
     versionCode?: number,
     variant?: string,
+    currentVersionName?: string,
   ) {
     const normalizedPlatform = this.normalizePlatform(platform);
     const latest = await this.prisma.appVersion.findFirst({
@@ -60,7 +94,17 @@ export class AppVersionService {
       return { hasUpdate: false, forceUpdate: false, latest: null };
     }
 
-    const hasUpdate = versionCode ? latest.versionCode > versionCode : true;
+    // 版本比较：versionCode 数值比较（兼容旧客户端）与 versionName semver 比较取或；
+    // 两者都未提供时保持原有语义（返回最新版本供展示，hasUpdate=true）
+    const newerByCode =
+      versionCode != null ? latest.versionCode > versionCode : false;
+    const newerByName = currentVersionName
+      ? isNewerVersion(currentVersionName, latest.versionName)
+      : false;
+    const hasUpdate =
+      versionCode == null && !currentVersionName
+        ? true
+        : newerByCode || newerByName;
     // 强制更新语义：本版本被标记强制 或 当前版本低于最低兼容版本
     const forceUpdate =
       latest.forceUpdate ||
@@ -86,6 +130,127 @@ export class AppVersionService {
         releaseDate: latest.createdAt,
       },
     };
+  }
+
+  /**
+   * 平台更新检查端点（/api/update/android、/api/update/pc）
+   * Android 与 PC 各自独立取最新版本，互不影响
+   * @param platform android / pc（pc 映射为 windows 存储）
+   * @param currentVersion 当前版本：纯数字按 versionCode 数值比较，否则按 semver 与 versionName 比较；缺失或非法抛 400
+   */
+  async getPlatformLatestVersion(
+    platform: UpdatePlatform,
+    currentVersion: string | undefined,
+    channel: string = 'stable',
+    variant?: string,
+  ) {
+    if (!currentVersion || !currentVersion.trim()) {
+      throw new BadRequestException('缺少 currentVersion 参数');
+    }
+    const current = currentVersion.trim();
+
+    const normalizedPlatform = this.normalizePlatform(platform);
+    const latest = await this.prisma.appVersion.findFirst({
+      where: {
+        channel,
+        platform: normalizedPlatform,
+        status: 'published',
+        ...(variant ? { variant } : {}),
+      },
+      orderBy: { versionCode: 'desc' },
+    });
+
+    if (!latest) {
+      return { hasUpdate: false, forceUpdate: false, latest: null };
+    }
+
+    // currentVersion 兼容两种形态：纯数字（Android versionCode）/ semver（PC 版本号）
+    const isNumeric = /^\d+$/.test(current);
+    let hasUpdate: boolean;
+    let forceUpdate: boolean;
+
+    if (isNumeric) {
+      const code = Number(current);
+      hasUpdate = latest.versionCode > code;
+      forceUpdate = latest.forceUpdate || code < latest.minVersionCode;
+    } else {
+      if (!parseVersion(current)) {
+        throw new BadRequestException(
+          'currentVersion 格式非法：应为纯数字版本码或语义化版本号（如 1.4.3）',
+        );
+      }
+      hasUpdate = isNewerVersion(current, latest.versionName);
+      // semver 比较无法对应 minVersionCode，强制更新仅按版本标记判断
+      forceUpdate = latest.forceUpdate;
+    }
+
+    return {
+      hasUpdate,
+      forceUpdate,
+      latest: {
+        id: latest.id,
+        version: latest.versionName,
+        title: latest.title,
+        versionCode: latest.versionCode,
+        changelog: latest.content ? this.parseContent(latest.content) : [],
+        downloadUrl: latest.downloadUrl,
+        fileSize: latest.fileSize,
+        md5: latest.md5,
+        forceUpdate: latest.forceUpdate,
+        minVersionCode: latest.minVersionCode,
+        channel: latest.channel,
+        platform: latest.platform,
+        variant: latest.variant,
+        publishedAt: latest.createdAt,
+      },
+    };
+  }
+
+  /**
+   * 官网公共接口：一次性返回两平台最新正式版（stable + published，60s 内存缓存）
+   * 平台暂无版本时对应字段返回 null，不报错
+   */
+  async getPublicAppVersions(): Promise<PublicAppVersionSummary> {
+    const cached = this.publicVersionsCache;
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.data;
+    }
+
+    const [android, pc] = await Promise.all([
+      this.prisma.appVersion.findFirst({
+        where: { platform: 'android', channel: 'stable', status: 'published' },
+        orderBy: { versionCode: 'desc' },
+      }),
+      this.prisma.appVersion.findFirst({
+        where: { platform: 'windows', channel: 'stable', status: 'published' },
+        orderBy: { versionCode: 'desc' },
+      }),
+    ]);
+
+    const toSummary = (
+      v: typeof android,
+    ): PublicAppVersionSummary['android'] =>
+      v
+        ? {
+            version: v.versionName,
+            versionCode: v.versionCode,
+            changelog: v.content ? this.parseContent(v.content) : [],
+            downloadUrl: v.downloadUrl,
+            fileSize: v.fileSize,
+            publishedAt: v.createdAt,
+          }
+        : null;
+
+    const data: PublicAppVersionSummary = {
+      android: toSummary(android),
+      pc: toSummary(pc),
+    };
+
+    this.publicVersionsCache = {
+      expiresAt: Date.now() + AppVersionService.PUBLIC_CACHE_TTL_MS,
+      data,
+    };
+    return data;
   }
 
   /**

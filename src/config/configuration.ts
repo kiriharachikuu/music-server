@@ -26,6 +26,13 @@ export default () => ({
       .map((s) => s.trim())
       .filter(Boolean),
   },
+  publicApi: {
+    // 官网公共接口 /api/public/app-versions 专用跨域白名单（未配置时回落到通用白名单）
+    corsOrigins: (process.env.PUBLIC_API_CORS_ORIGINS || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+  },
   security: {
     helmetEnabled: process.env.HELMET_ENABLED !== 'false',
     hstsEnabled: process.env.HSTS_ENABLED !== 'false',

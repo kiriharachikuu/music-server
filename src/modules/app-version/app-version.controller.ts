@@ -30,6 +30,7 @@ export class AppVersionController {
    * @param platform 平台 android/windows/ios（兼容旧值 desktop）
    * @param versionCode 当前版本号
    * @param variant 发布形态 full/setup/portable（可选）
+   * @param currentVersionName 当前语义化版本号（可选，semver 比较）
    */
   @Get('latest')
   checkLatest(
@@ -37,6 +38,7 @@ export class AppVersionController {
     @Query('platform') platform?: string,
     @Query('versionCode') versionCode?: string,
     @Query('variant') variant?: string,
+    @Query('currentVersionName') currentVersionName?: string,
   ) {
     const code = versionCode ? parseInt(versionCode, 10) : undefined;
     return this.appVersionService.getLatestVersion(
@@ -44,6 +46,7 @@ export class AppVersionController {
       platform,
       code,
       variant,
+      currentVersionName,
     );
   }
 
