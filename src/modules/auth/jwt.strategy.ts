@@ -42,8 +42,11 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('用户不存在或已被禁用');
     }
     if (user.passwordUpdatedAt && payload.iat) {
-      const tokenIssuedAt = new Date(payload.iat * 1000);
-      if (tokenIssuedAt < user.passwordUpdatedAt) {
+      // JWT iat 只有秒级精度，而 passwordUpdatedAt 是毫秒级；
+      // 注册时"写库 → 签发 token"发生在同一秒内，若直接比较毫秒时间戳
+      // 会误判为"密码已修改"。故将密码更新时间向下取整到秒后再比较。
+      const passwordChangedAt = Math.floor(user.passwordUpdatedAt.getTime() / 1000);
+      if (passwordChangedAt > payload.iat) {
         throw new UnauthorizedException('密码已修改，请重新登录');
       }
     }
