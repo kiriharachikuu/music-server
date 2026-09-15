@@ -433,6 +433,29 @@ export class UserController {
     return this.userService.getQualityPreference(userId);
   }
 
+  /** GET /api/user/playback-state 跨端续播: 获取最新播放状态 */
+  @Get('playback-state')
+  getPlaybackState(@CurrentUser('id') userId: string) {
+    return this.userService.getPlaybackState(userId);
+  }
+
+  /** PUT /api/user/playback-state 跨端续播: 上报播放状态 (任意端调用) */
+  @Put('playback-state')
+  @HttpCode(HttpStatus.OK)
+  upsertPlaybackState(
+    @CurrentUser('id') userId: string,
+    @Body()
+    dto: {
+      songId?: string | null;
+      clipId?: string | null;
+      position?: number;
+      queueIds?: string[];
+      device?: string;
+    },
+  ) {
+    return this.userService.upsertPlaybackState(userId, dto);
+  }
+
   /** PUT /api/user/preferences/quality 设置音质偏好 */
   @Put('preferences/quality')
   @HttpCode(HttpStatus.OK)

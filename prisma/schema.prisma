@@ -30,6 +30,12 @@ enum BannerStatus {
   HIDDEN
 }
 
+// 头像框显示状态
+enum AvatarFrameStatus {
+  VISIBLE
+  HIDDEN
+}
+
 // 音质级别枚举
 enum QualityLevel {
   HIGH
@@ -68,6 +74,11 @@ model User {
    * 密码最近更新时间，用于校验 JWT 是否在密码修改前签发（旧 token 自动失效）
    */
   passwordUpdatedAt DateTime?
+  /**
+   * 当前佩戴的头像框（多端同步：各端拉 profile 即得）
+   */
+  avatarFrameId     String?
+  avatarFrame       AvatarFrame? @relation(fields: [avatarFrameId], references: [id], onDelete: SetNull)
 
   playlists         Playlist[]
   favorites         Favorite[]
@@ -79,6 +90,7 @@ model User {
   sessionFavorites  LiveSessionFavorite[]
   clipFavorites     LiveClipFavorite[]
   userPreference    UserPreference?
+  playbackState     PlaybackState?
 
   @@index([deletedAt])
 }
@@ -217,6 +229,21 @@ model Banner {
   updatedAt DateTime     @updatedAt
 
   song Song? @relation(fields: [songId], references: [id], onDelete: SetNull)
+
+  @@index([sort, status])
+}
+
+// 头像框表（后台维护素材，用户佩戴后多端同步显示）
+model AvatarFrame {
+  id        String            @id @default(cuid())
+  name      String // 展示名，如 "星光闪耀"
+  imageUrl  String // 框图 URL（PNG 透明环）
+  sort      Int               @default(0) // 小者靠前
+  status    AvatarFrameStatus @default(VISIBLE)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  users User[]
 
   @@index([sort, status])
 }
@@ -633,6 +660,21 @@ model UserPreference {
 
   @@unique([userId])
   @@index([userId])
+}
+
+// 跨端续播: 每用户一条最新播放状态 (任意端上报, 任意端恢复)
+model PlaybackState {
+  userId    String   @id
+  songId    String?
+  clipId    String?
+  position  Int      @default(0) // 播放进度 (秒)
+  queueIds  Json? // 播放队列歌曲 id 列表 (最多 100)
+  device    String? // 上报设备名 (Web / PC 客户端)
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([updatedAt])
 }
 
 // 批量转码任务表

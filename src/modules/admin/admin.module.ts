@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AdminAlbumController } from './admin-album.controller';
 import { AdminArtistController } from './admin-artist.controller';
 import { AdminArtistMergeController } from './admin-artist-merge.controller';
+import { AdminAvatarFrameController } from './admin-avatar-frame.controller';
 import { AdminBannerController } from './admin-banner.controller';
 import { AdminMigrationController } from './admin-migration.controller';
 import { AdminPlaylistController } from './admin-playlist.controller';
@@ -40,6 +41,7 @@ import { LiveSessionModule } from '../live-session/live-session.module';
     AdminArtistMergeController,
     AdminPlaylistController,
     AdminBannerController,
+    AdminAvatarFrameController,
     AdminUserController,
     AdminSettingController,
     AdminUploadController,

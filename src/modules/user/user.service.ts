@@ -25,22 +25,23 @@ export class UserService {
     private readonly operationLogService: OperationLogService,
   ) {}
 
-  /** 获取当前用户资料（不含密码） */
+  /** 获取当前用户资料（不含密码，含佩戴的头像框） */
   async getProfile(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
+      include: { avatarFrame: true },
     });
     if (!user || user.deletedAt) {
       throw new NotFoundException('用户不存在');
     }
-    const { password: _password, ...rest } = user;
+    const { password: _password, avatarFrameId: _frameId, ...rest } = user;
     return rest;
   }
 
-  /** 更新用户资料（昵称 / 头像） */
+  /** 更新用户资料（昵称 / 头像 / 头像框） */
   async updateProfile(
     userId: string,
-    data: { username?: string; avatar?: string },
+    data: { username?: string; avatar?: string; avatarFrameId?: string },
   ) {
     // 昵称唯一性校验
     if (data.username) {
@@ -54,14 +55,33 @@ export class UserService {
         throw new ForbiddenException('该昵称已被占用');
       }
     }
+
+    // 头像框校验：空字符串表示摘除；否则必须存在且可见
+    let avatarFrameId: string | null | undefined = undefined;
+    if (data.avatarFrameId !== undefined) {
+      if (data.avatarFrameId === '') {
+        avatarFrameId = null;
+      } else {
+        const frame = await this.prisma.avatarFrame.findUnique({
+          where: { id: data.avatarFrameId },
+        });
+        if (!frame || frame.status !== 'VISIBLE') {
+          throw new NotFoundException('头像框不存在或已下架');
+        }
+        avatarFrameId = frame.id;
+      }
+    }
+
     const updated = await this.prisma.user.update({
       where: { id: userId },
       data: {
         ...(data.username !== undefined && { username: data.username }),
         ...(data.avatar !== undefined && { avatar: data.avatar }),
+        ...(avatarFrameId !== undefined && { avatarFrameId }),
       },
+      include: { avatarFrame: true },
     });
-    const { password: _password, ...rest } = updated;
+    const { password: _password, avatarFrameId: _frameId, ...rest } = updated;
     return rest;
   }
 
@@ -771,5 +791,62 @@ export class UserService {
     }
 
     return { preferredQuality: quality };
+  }
+
+  /** 跨端续播: 获取最新播放状态 (无记录返回 null) */
+  async getPlaybackState(userId: string) {
+    const state = await this.prisma.playbackState.findUnique({
+      where: { userId },
+    });
+    if (!state) return null;
+    const queueIds = Array.isArray(state.queueIds)
+      ? (state.queueIds as string[])
+      : typeof state.queueIds === 'string'
+        ? (() => {
+            try {
+              return JSON.parse(state.queueIds) as string[];
+            } catch {
+              return [];
+            }
+          })()
+        : [];
+    return {
+      songId: state.songId,
+      clipId: state.clipId,
+      position: state.position,
+      queueIds,
+      device: state.device,
+      updatedAt: state.updatedAt.toISOString(),
+    };
+  }
+
+  /** 跨端续播: 上报播放状态 (upsert, 每用户仅一条) */
+  async upsertPlaybackState(
+    userId: string,
+    dto: {
+      songId?: string | null;
+      clipId?: string | null;
+      position?: number;
+      queueIds?: string[];
+      device?: string;
+    },
+  ) {
+    const position = Math.max(0, Math.min(Math.floor(dto.position ?? 0), 86_400));
+    const queueIds = Array.isArray(dto.queueIds)
+      ? dto.queueIds.slice(0, 100)
+      : undefined;
+    const data = {
+      songId: dto.songId ?? null,
+      clipId: dto.clipId ?? null,
+      position,
+      queueIds: queueIds === undefined ? undefined : (queueIds as unknown as object),
+      device: dto.device ?? null,
+    };
+    await this.prisma.playbackState.upsert({
+      where: { userId },
+      update: data,
+      create: { userId, ...data },
+    });
+    return { ok: true };
   }
 }

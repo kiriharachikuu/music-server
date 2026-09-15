@@ -21,6 +21,7 @@ import { SongModule } from './modules/song/song.module';
 import { AlbumModule } from './modules/album/album.module';
 import { PlaylistModule } from './modules/playlist/playlist.module';
 import { BannerModule } from './modules/banner/banner.module';
+import { AvatarFrameModule } from './modules/avatar-frame/avatar-frame.module';
 import { SearchModule } from './modules/search/search.module';
 import { UploadModule } from './modules/upload/upload.module';
 import { AdminModule } from './modules/admin/admin.module';
@@ -50,6 +51,7 @@ import { LiveSessionModule } from './modules/live-session/live-session.module';
     AlbumModule,
     PlaylistModule,
     BannerModule,
+    AvatarFrameModule,
     SearchModule,
     UploadModule,
     AdminModule,

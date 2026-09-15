@@ -8,6 +8,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateAlbumDto, UpdateAlbumDto } from './dto/album.dto';
 import { CreateArtistDto, UpdateArtistDto } from './dto/artist.dto';
+import { CreateAvatarFrameDto, UpdateAvatarFrameDto } from './dto/avatar-frame.dto';
 import { CreateBannerDto, UpdateBannerDto } from './dto/banner.dto';
 import { CreatePlaylistDto, UpdatePlaylistDto } from './dto/playlist.dto';
 import { CreateSongDto, UpdateSongDto } from './dto/song.dto';
@@ -550,6 +551,85 @@ export class AdminResourceService {
     return { sorted: true };
   }
 
+  // ============ 头像框 ============
+
+  async listAvatarFrames(query: {
+    page?: string;
+    limit?: string;
+    pageSize?: string;
+  }): Promise<PaginatedResult<unknown>> {
+    const { page, limit, skip, take } = parsePagination(query);
+    const [list, total] = await this.prisma.$transaction([
+      this.prisma.avatarFrame.findMany({
+        orderBy: { sort: 'asc' },
+        skip,
+        take,
+        include: { _count: { select: { users: true } } },
+      }),
+      this.prisma.avatarFrame.count(),
+    ]);
+    return buildPaginatedResult(list, total, page, limit);
+  }
+
+  async createAvatarFrame(dto: CreateAvatarFrameDto) {
+    return this.prisma.avatarFrame.create({
+      data: {
+        name: dto.name,
+        imageUrl: dto.imageUrl,
+        sort: dto.sort ?? 0,
+        status: dto.status ?? 'VISIBLE',
+      },
+    });
+  }
+
+  async updateAvatarFrame(id: string, dto: UpdateAvatarFrameDto) {
+    await this.assertAvatarFrameExists(id);
+    const { name, imageUrl, sort, status } = dto;
+    return this.prisma.avatarFrame.update({
+      where: { id },
+      data: {
+        ...(name !== undefined && { name }),
+        ...(imageUrl !== undefined && { imageUrl }),
+        ...(sort !== undefined && { sort }),
+        ...(status !== undefined && { status }),
+      },
+    });
+  }
+
+  async deleteAvatarFrame(id: string): Promise<{ deleted: true }> {
+    await this.assertAvatarFrameExists(id);
+    // 硬删除，佩戴中的用户由外键 onDelete: SetNull 自动摘除
+    await this.prisma.avatarFrame.delete({ where: { id } });
+    return { deleted: true };
+  }
+
+  /** 排序：与相邻头像框交换 sort 值 */
+  async sortAvatarFrame(id: string, direction: 'up' | 'down'): Promise<{ sorted: true }> {
+    const allFrames = await this.prisma.avatarFrame.findMany({
+      orderBy: { sort: 'asc' },
+    });
+    const index = allFrames.findIndex((f) => f.id === id);
+    if (index < 0) throw new NotFoundException('头像框不存在');
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= allFrames.length) {
+      return { sorted: true };
+    }
+
+    const current = allFrames[index];
+    const target = allFrames[targetIndex];
+    await this.prisma.$transaction([
+      this.prisma.avatarFrame.update({
+        where: { id: current.id },
+        data: { sort: target.sort },
+      }),
+      this.prisma.avatarFrame.update({
+        where: { id: target.id },
+        data: { sort: current.sort },
+      }),
+    ]);
+    return { sorted: true };
+  }
+
   // ============ 用户管理 ============
 
   async listUsers(query: {
@@ -840,6 +920,11 @@ export class AdminResourceService {
   private async assertBannerExists(id: string) {
     const banner = await this.prisma.banner.findUnique({ where: { id } });
     if (!banner) throw new NotFoundException('Banner 不存在');
+  }
+
+  private async assertAvatarFrameExists(id: string) {
+    const frame = await this.prisma.avatarFrame.findUnique({ where: { id } });
+    if (!frame) throw new NotFoundException('头像框不存在');
   }
 
   private async assertUserExists(id: string) {
