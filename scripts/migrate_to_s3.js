@@ -59,6 +59,7 @@ const URL_FIELDS = [
   { model: 'playlist', field: 'cover' },
   { model: 'banner', field: 'imageUrl' },
   { model: 'user', field: 'avatar' },
+  { model: 'avatarFrame', field: 'imageUrl' },
   { model: 'appVersion', field: 'downloadUrl' },
 ];
 
