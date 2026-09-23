@@ -6,6 +6,72 @@ import {
   parsePagination,
 } from '../../common/utils/pagination.util';
 
+/** 无损源扩展名集合 (default 原始档按此判断是否为无损) */
+const LOSSLESS_EXTS = new Set(['flac', 'wav', 'aiff', 'aif', 'alac', 'ape']);
+
+/** 从 URL 提取小写扩展名 (去 query/hash, 无扩展名返回空串) */
+function extFromUrl(url?: string | null): string {
+  const name = (url || '').split('?')[0].split('#')[0];
+  const idx = name.lastIndexOf('.');
+  return idx >= 0 ? name.slice(idx + 1).toLowerCase() : '';
+}
+
+/**
+ * 音质档位渲染元数据 (服务端统一口径, 客户端直接展示, 不再自行判定格式)
+ * - 转码档 (high/medium/low): 固定文案
+ * - 原始档 (default): 按源文件扩展名判断, 无损源显示"无损 (SQ)", 有损源显示"原始音质"
+ */
+function buildQualityMeta(level: string, fileUrl?: string | null) {
+  if (level === 'high') {
+    return {
+      name: '极高品质',
+      label: '极高 (HQ)',
+      badge: 'HQ',
+      desc: '近 CD 音质的细节体验，最高 320kbps MP3',
+      isLossless: false,
+    };
+  }
+  if (level === 'medium') {
+    return {
+      name: '良好音质',
+      label: '良好 (MQ)',
+      badge: 'MQ',
+      desc: '音质与体积均衡，192kbps MP3，日常聆听推荐',
+      isLossless: false,
+    };
+  }
+  if (level === 'low') {
+    return {
+      name: '标准音质',
+      label: '标准',
+      badge: '标',
+      desc: '节省流量，128kbps MP3，适合网络较差环境',
+      isLossless: false,
+    };
+  }
+  // default 原始档
+  const ext = extFromUrl(fileUrl);
+  if (LOSSLESS_EXTS.has(ext)) {
+    return {
+      name: '无损音质',
+      label: '无损 (SQ)',
+      badge: 'SQ',
+      desc:
+        ext === 'flac'
+          ? 'FLAC 无损格式，完整保留音频细节'
+          : `${ext.toUpperCase()} 无损格式，完整保留音频细节`,
+      isLossless: true,
+    };
+  }
+  return {
+    name: '原始音质',
+    label: '原始音质',
+    badge: '原',
+    desc: ext ? `原始文件 · ${ext.toUpperCase()} 格式` : '未经转码的原始音频文件',
+    isLossless: false,
+  };
+}
+
 @Injectable()
 export class SongService {
   private readonly logger = new Logger(SongService.name);
@@ -210,6 +276,7 @@ export class SongService {
             bitrate: 0,
             fileUrl: song.fileUrl,
             fileSize: 0,
+            ...buildQualityMeta('default', song.fileUrl),
           },
         ];
       }
@@ -225,13 +292,29 @@ export class SongService {
           (qualityOrder[a.quality] ?? 99) - (qualityOrder[b.quality] ?? 99),
       );
 
-      return sorted.map((q) => ({
-        level: q.quality.toLowerCase() as 'high' | 'medium' | 'low',
-        quality: q.quality,
-        bitrate: q.bitrate,
-        fileUrl: q.fileUrl,
-        fileSize: q.fileSize,
-      }));
+      return [
+        ...sorted.map((q) => ({
+          level: q.quality.toLowerCase() as 'high' | 'medium' | 'low',
+          quality: q.quality,
+          bitrate: q.bitrate,
+          fileUrl: q.fileUrl,
+          fileSize: q.fileSize,
+          ...buildQualityMeta(q.quality.toLowerCase(), q.fileUrl),
+        })),
+        // 追加原始文件档（上传的源文件，可能为 FLAC/WAV 等无损格式），供下载无损使用
+        ...(song.fileUrl
+          ? [
+              {
+                level: 'default' as const,
+                quality: 'DEFAULT',
+                bitrate: 0,
+                fileUrl: song.fileUrl,
+                fileSize: 0,
+                ...buildQualityMeta('default', song.fileUrl),
+              },
+            ]
+          : []),
+      ];
     }
 
     // song 表没找到，查 liveClip 表
@@ -243,7 +326,7 @@ export class SongService {
       throw new NotFoundException('歌曲不存在');
     }
 
-    // 歌切只有原始文件，返回默认音质
+    // 歌切只有原始文件，返回默认音质（附渲染元数据，由服务端判定格式口径）
     return [
       {
         level: 'default' as const,
@@ -251,6 +334,7 @@ export class SongService {
         bitrate: 0,
         fileUrl: clip.fileUrl,
         fileSize: 0,
+        ...buildQualityMeta('default', clip.fileUrl),
       },
     ];
   }
