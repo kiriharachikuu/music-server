@@ -61,6 +61,13 @@ export class CreateSongDto {
   @ArrayMaxSize(10, { message: '歌手最多 10 个' })
   @IsString({ each: true })
   artistIds?: string[];
+
+  /** 新歌手名字 (上传时直接输入, 服务端自动建为无主页的虚拟歌手); 与 artistIds 合并按序署名 */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10, { message: '歌手最多 10 个' })
+  @IsString({ each: true })
+  artistNames?: string[];
 }
 
 /** 管理后台 - 更新歌曲 DTO（全部可选） */
@@ -77,4 +84,5 @@ export class UpdateSongDto {
   @IsOptional() @IsEnum(SongStatus) status?: SongStatus;
   @IsOptional() @IsArray() @IsString({ each: true }) tagIds?: string[];
   @IsOptional() @IsArray() @IsString({ each: true }) artistIds?: string[];
+  @IsOptional() @IsArray() @IsString({ each: true }) artistNames?: string[];
 }

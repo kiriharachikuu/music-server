@@ -113,6 +113,7 @@ export class SoarRankingService {
               songArtists: {
                 take: 1,
                 orderBy: { sort: 'asc' },
+                where: { artist: { hasHomepage: true } },
                 include: { artist: { select: { id: true } } },
               },
             },

@@ -16,7 +16,8 @@ export class ArtistService {
   constructor(private readonly prisma: PrismaService) {}
 
   async getList({ page, limit, sort }: ListParams) {
-    const where = { deletedAt: null };
+    // 虚拟歌手 (hasHomepage=false) 不出现在公开歌手列表
+    const where = { deletedAt: null, hasHomepage: true };
     const orderBy =
       sort === 'name'
         ? { name: 'asc' as const }
@@ -120,7 +121,7 @@ export class ArtistService {
 
   async getDetail(id: string) {
     const artist = await this.prisma.artist.findFirst({
-      where: { id, deletedAt: null },
+      where: { id, deletedAt: null, hasHomepage: true },
       include: {
         songArtists: {
           where: { song: { deletedAt: null, status: 'PUBLISHED' } },
@@ -205,7 +206,7 @@ export class ArtistService {
     query: { page?: string; limit?: string; pageSize?: string; sort?: string },
   ) {
     const artist = await this.prisma.artist.findFirst({
-      where: { id, deletedAt: null },
+      where: { id, deletedAt: null, hasHomepage: true },
       select: { id: true, name: true },
     });
     if (!artist) {
@@ -258,7 +259,7 @@ export class ArtistService {
     query: { page?: string; limit?: string; pageSize?: string },
   ) {
     const artist = await this.prisma.artist.findFirst({
-      where: { id, deletedAt: null },
+      where: { id, deletedAt: null, hasHomepage: true },
       select: { id: true, name: true },
     });
     if (!artist) {

@@ -149,6 +149,7 @@ export class SearchService {
           songArtists: {
             take: 1,
             orderBy: { sort: 'asc' },
+            where: { artist: { hasHomepage: true } },
             include: { artist: { select: { id: true } } },
           },
         },
@@ -182,6 +183,8 @@ export class SearchService {
       this.prisma.artist.findMany({
         where: {
           deletedAt: null,
+          // 虚拟歌手不参与歌手搜索结果
+          hasHomepage: true,
           OR: [
             { name: { contains: q } },
             ...this.buildArtistTermClauses(terms, q),
@@ -276,7 +279,7 @@ export class SearchService {
       // Artist 表关键词未命中时，按歌曲 artist 字符串回查 Artist 表，尽量补齐 id / avatar
       const namedArtists = names.length
         ? await this.prisma.artist.findMany({
-            where: { deletedAt: null, name: { in: names } },
+            where: { deletedAt: null, hasHomepage: true, name: { in: names } },
             select: { id: true, name: true, avatar: true },
           })
         : [];

@@ -66,17 +66,13 @@ export class AdminResourceService {
   }
 
   async createSong(dto: CreateSongDto) {
-    const { tagIds, albumId, releaseDate, artistIds, ...rest } = dto;
+    const { tagIds, albumId, releaseDate, artistIds, artistNames, ...rest } = dto;
     return this.prisma.$transaction(async (tx) => {
-      let artistDisplay = rest.artist;
-      if (artistIds?.length) {
-        const artists = await tx.artist.findMany({
-          where: { id: { in: artistIds } },
-          select: { id: true, name: true },
-        });
-        const sorted = artistIds.map((id) => artists.find((a) => a.id === id)?.name).filter(Boolean) as string[];
-        if (sorted.length) artistDisplay = sorted.join(' / ');
-      }
+      // 已有歌手 + 新名字 (自动建为无主页虚拟歌手) 合并解析为有序关联
+      const resolved = await this.resolveArtists(tx, artistIds, artistNames);
+      const artistDisplay = resolved.length
+        ? resolved.map((a) => a.name).join(' / ')
+        : rest.artist;
 
       const song = await tx.song.create({
         data: {
@@ -87,8 +83,8 @@ export class AdminResourceService {
           ...(tagIds?.length
             ? { songTags: { create: tagIds.map((tagId) => ({ tagId })) } }
             : {}),
-          ...(artistIds?.length
-            ? { songArtists: { create: artistIds.map((artistId, index) => ({ artistId, sort: index })) } }
+          ...(resolved.length
+            ? { songArtists: { create: resolved.map((a, index) => ({ artistId: a.id, sort: index })) } }
             : {}),
         },
         include: { album: true, songTags: { include: { tag: true } }, songArtists: { include: { artist: true } } },
@@ -105,7 +101,7 @@ export class AdminResourceService {
   }
 
   async updateSong(id: string, dto: UpdateSongDto) {
-    const { tagIds, albumId, releaseDate, artistIds, ...rest } = dto;
+    const { tagIds, albumId, releaseDate, artistIds, artistNames, ...rest } = dto;
     return this.prisma.$transaction(async (tx) => {
       const existing = await tx.song.findFirst({ where: { id } });
       if (!existing) throw new NotFoundException('歌曲不存在');
@@ -120,20 +116,16 @@ export class AdminResourceService {
         }
       }
 
-      // 歌手全量替换 + 派生 artist 显示字段
+      // 歌手全量替换 + 派生 artist 显示字段 (artistIds 或 artistNames 任一出现即重算)
       let artistDisplay: string | undefined = undefined;
-      if (artistIds !== undefined) {
+      if (artistIds !== undefined || artistNames !== undefined) {
+        const resolved = await this.resolveArtists(tx, artistIds ?? [], artistNames ?? []);
         await tx.songArtist.deleteMany({ where: { songId: id } });
-        if (artistIds.length) {
+        if (resolved.length) {
           await tx.songArtist.createMany({
-            data: artistIds.map((artistId, index) => ({ songId: id, artistId, sort: index })),
+            data: resolved.map((a, index) => ({ songId: id, artistId: a.id, sort: index })),
           });
-          const artists = await tx.artist.findMany({
-            where: { id: { in: artistIds } },
-            select: { id: true, name: true },
-          });
-          const sorted = artistIds.map((aid) => artists.find((a) => a.id === aid)?.name).filter(Boolean) as string[];
-          if (sorted.length) artistDisplay = sorted.join(' / ');
+          artistDisplay = resolved.map((a) => a.name).join(' / ');
         } else {
           artistDisplay = '';
         }
@@ -762,6 +754,7 @@ export class AdminResourceService {
           ...(data.avatar !== undefined && { avatar: data.avatar }),
           ...(data.bio !== undefined && { bio: data.bio }),
           ...(data.representativeWorks !== undefined && { representativeWorks: data.representativeWorks }),
+          ...(data.hasHomepage !== undefined && { hasHomepage: data.hasHomepage }),
         },
       });
 
@@ -824,6 +817,57 @@ export class AdminResourceService {
   }
 
   // ============ 辅助方法 ============
+
+  /**
+   * 解析歌曲署名: 已有歌手 id (artistIds) + 新名字 (artistNames) 合并为有序、去重的歌手列表。
+   * 新名字若命中已存在 (含虚拟) 歌手则复用其 id, 否则自动建为 hasHomepage=false 的虚拟歌手。
+   */
+  private async resolveArtists(
+    tx: any,
+    artistIds: string[] = [],
+    artistNames: string[] = [],
+  ): Promise<Array<{ id: string; name: string }>> {
+    const result: Array<{ id: string; name: string }> = [];
+    const seen = new Set<string>();
+    const push = (id: string, name: string) => {
+      if (seen.has(id)) return;
+      seen.add(id);
+      result.push({ id, name });
+    };
+
+    // 1) 已有歌手: 按传入顺序, 忽略软删除
+    if (artistIds.length) {
+      const found: Array<{ id: string; name: string }> = await tx.artist.findMany({
+        where: { id: { in: artistIds }, deletedAt: null },
+        select: { id: true, name: true },
+      });
+      const byId = new Map(found.map((a) => [a.id, a.name]));
+      for (const id of artistIds) {
+        const name = byId.get(id);
+        if (name) push(id, name);
+      }
+    }
+
+    // 2) 新名字: trim 去空; 命中已存在歌手则复用 (同名唯一), 否则建虚拟歌手
+    for (const raw of artistNames) {
+      const name = typeof raw === 'string' ? raw.trim() : '';
+      if (!name) continue;
+      const existing = await tx.artist.findFirst({
+        where: { name, deletedAt: null },
+        select: { id: true },
+      });
+      if (existing) {
+        push(existing.id, name);
+      } else {
+        const created = await tx.artist.create({
+          data: { name, hasHomepage: false },
+          select: { id: true },
+        });
+        push(created.id, name);
+      }
+    }
+    return result;
+  }
 
   private async refreshSongArtistDisplay(
     tx: any,

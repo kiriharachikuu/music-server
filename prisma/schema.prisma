@@ -430,6 +430,8 @@ model Artist {
   avatar              String?
   bio                 String?
   representativeWorks String?
+  /** 是否拥有公开歌手主页: false=仅署名的虚拟歌手 (上传时输入名字自动建档), 不出现在公开歌手列表/搜索, 客户端歌手名不可点 */
+  hasHomepage         Boolean   @default(true)
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
   deletedAt           DateTime?
@@ -442,6 +444,7 @@ model Artist {
 
   @@index([name])
   @@index([deletedAt])
+  @@index([hasHomepage])
 }
 
 // 歌曲-歌手关联表（多对多）

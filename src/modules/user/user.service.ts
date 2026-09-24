@@ -164,6 +164,7 @@ export class UserService {
               songArtists: {
                 take: 1,
                 orderBy: { sort: 'asc' },
+                where: { artist: { hasHomepage: true } },
                 include: { artist: { select: { id: true } } },
               },
             },
@@ -518,6 +519,7 @@ export class UserService {
               songArtists: {
                 take: 1,
                 orderBy: { sort: 'asc' },
+                where: { artist: { hasHomepage: true } },
                 include: { artist: { select: { id: true } } },
               },
             },
@@ -728,6 +730,7 @@ export class UserService {
               songArtists: {
                 take: 1,
                 orderBy: { sort: 'asc' },
+                where: { artist: { hasHomepage: true } },
                 include: { artist: { select: { id: true } } },
               },
             },
@@ -763,14 +766,15 @@ export class UserService {
   async getQualityPreference(userId: string) {
     const preference = await this.prisma.userPreference.findUnique({
       where: { userId },
-      select: { preferredQuality: true },
+      select: { preferredQuality: true, updatedAt: true },
     });
 
     if (!preference) {
-      return { preferredQuality: 'LOW' as const };
+      // 无云端记录: 返回默认 LOW, updatedAt 为 null (客户端据此识别"云端从未设置")
+      return { preferredQuality: 'LOW' as const, updatedAt: null as Date | null };
     }
 
-    return { preferredQuality: preference.preferredQuality };
+    return { preferredQuality: preference.preferredQuality, updatedAt: preference.updatedAt };
   }
 
   /** 设置用户音质偏好 */
@@ -780,17 +784,19 @@ export class UserService {
     });
 
     if (existing) {
-      await this.prisma.userPreference.update({
+      const updated = await this.prisma.userPreference.update({
         where: { userId },
         data: { preferredQuality: quality },
+        select: { preferredQuality: true, updatedAt: true },
       });
+      return updated;
     } else {
-      await this.prisma.userPreference.create({
+      const created = await this.prisma.userPreference.create({
         data: { userId, preferredQuality: quality },
+        select: { preferredQuality: true, updatedAt: true },
       });
+      return created;
     }
-
-    return { preferredQuality: quality };
   }
 
   /** 跨端续播: 获取最新播放状态 (无记录返回 null) */
